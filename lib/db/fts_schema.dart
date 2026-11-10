@@ -10,11 +10,13 @@ import 'package:drift/drift.dart';
 extension FtsSchema on DatabaseConnectionUser {
   Future<void> createFtsSchema() async {
     await customStatement(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5("
-        "title, body, tokenize='unicode61')");
+      "CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5("
+      "title, body, tokenize='unicode61')",
+    );
     await customStatement(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5("
-        "text, description, tokenize='unicode61')");
+      "CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5("
+      "text, description, tokenize='unicode61')",
+    );
     await _createTriggers();
   }
 

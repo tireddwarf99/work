@@ -3,7 +3,6 @@
   "appTitle": "Нотатки",
   "create": "Створити",
   "newNote": "Нова нотатка",
-  "newTask": "Додати завдання",
   "search": "Пошук",
   "dashboard": "Огляд",
   "notes": "Нотатки",
@@ -25,20 +24,22 @@
   "tomorrow": "Завтра",
   "yesterday": "Вчора",
   "noFolder": "Без папки",
-  "noList": "Без списку",
   "addTask": "Додати завдання",
   "completedN": "Виконані · {n}",
-  "@completedN": { "placeholders": { "n": { "type": "int" } } },
+  "@completedN": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "note": "Нотатка",
   "task": "Завдання",
   "descriptionLabel": "ОПИС",
   "dueLabel": "Термін",
   "priorityLabel": "Пріоритет",
-  "remindersLabel": "Нагадування",
-  "repeatLabel": "Повторення",
   "tagsLabel": "Теги",
   "subtasksLabel": "Підзавдання",
-  "noRepeat": "Не повторювати",
   "priorityHigh": "Високий",
   "priorityNormal": "Звичайний",
   "priorityLow": "Низький",
@@ -58,10 +59,8 @@
   "deleteTaskConfirm": "Видалити завдання з підзавданнями у кошик?",
   "deleteNoteConfirm": "Видалити нотатку у кошик?",
   "deleteFolderConfirm": "Видалити папку з усім вмістом у кошик?",
-  "deleteTagConfirm": "Видалити тег? Мітки буде знято, записи залишаться.",
   "trashEmpty": "Кошик порожній",
   "searchHint": "Пошук нотаток і завдань",
-  "searchResults": "Результати",
   "noResults": "Нічого не знайдено",
   "movedToNoFolderHint": "Початкова папка видалена — нотатку відновлено без папки.",
   "themeLight": "Світла",
@@ -72,21 +71,20 @@
   "systemLanguage": "Системна",
   "accountSection": "Акаунт",
   "accountLocalOnly": "Хмара не підключена — усе зберігається локально (етап 3).",
-  "notificationsSection": "Нотифікації",
-  "notificationsLocalDevice": "Налаштування нотифікацій діють на цьому пристрої (етап 5).",
-  "windowsOpenApp": "Відкрити",
   "pinned": "Закріплені",
   "pin": "Закріпити",
   "unpin": "Відкріпити",
   "moveToFolder": "Перемістити…",
   "embeddedFrom": "вбудований · {source}",
-  "@embeddedFrom": { "placeholders": { "source": { "type": "String" } } },
-  "standaloneList": "самостійний",
-  "notesSuffix": "{n} нотаток",
-  "@notesSuffix": { "placeholders": { "n": { "type": "int" } } },
+  "@embeddedFrom": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
   "emptyNotes": "Нотаток немає",
   "emptyNotesHint": "Створіть першу нотатку",
-  "dataLayerReady": "Слой даних готовий",
   "signIn": "Увійти через Google",
   "signOut": "Вийти",
   "signOutQuestion": "Залишити локальну копію даних на цьому пристрої?",
@@ -112,5 +110,102 @@
   "debugLogTitle": "Журнал подій",
   "debugLogEmpty": "Поки що подій немає",
   "debugAcceptSnapshot": "Прийняти новий знімок",
-  "debugAcceptSnapshotWarning": "Сервер перейшов на новий знімок даних. Прийняття затре несинхронізовані локальні зміни. Прийняти новий знімок?"
+  "debugAcceptSnapshotWarning": "Сервер перейшов на новий знімок даних. Прийняття затре несинхронізовані локальні зміни. Прийняти новий знімок?",
+  "newFolder": "Нова папка",
+  "folderNameHint": "Назва папки",
+  "rename": "Перейменувати",
+  "newList": "Новий список",
+  "listTitleHint": "Назва списку",
+  "deleteListConfirm": "Видалити список із завданнями у кошик?",
+  "taskTextHint": "Що потрібно зробити?",
+  "subtaskHint": "Назва підзавдання",
+  "noteTitleHint": "Назва нотатки",
+  "noteBodyHint": "Почніть писати…",
+  "tagNameHint": "Назва нового тега",
+  "saveFailed": "Не вдалося зберегти нотатку. Зміни залишаються в редакторі.",
+  "emptyListHint": "У списку ще немає завдань",
+  "openList": "Відкрити список",
+  "close": "Закрити",
+  "settingsTooltip": "Налаштування",
+  "changeDate": "Змінити дату",
+  "setTime": "Вказати час",
+  "removeTime": "Прибрати час",
+  "clearDue": "Прибрати термін",
+  "syncing": "Синхронізація…",
+  "pendingChangesN": "Очікують синхронізації: {n}",
+  "@pendingChangesN": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "epochSwitchPending": "Потрібне рішення щодо нового знімка (Діагностика)",
+  "signInFailed": "Не вдалося увійти",
+  "errorDetails": "Деталі",
+  "actionFailed": "Не вдалося виконати дію",
+  "dropForbidden": "Таке переміщення неможливе",
+  "restored": "Відновлено",
+  "folder": "Папка",
+  "yes": "так",
+  "no": "ні",
+  "debugSession": "Сесія: {value}",
+  "@debugSession": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "debugSync": "Синхронізація: {running} · остання: {last} · у черзі: {pending}",
+  "@debugSync": {
+    "placeholders": {
+      "running": {
+        "type": "String"
+      },
+      "last": {
+        "type": "String"
+      },
+      "pending": {
+        "type": "int"
+      }
+    }
+  },
+  "debugIdle": "очікує",
+  "debugError": "Помилка: {error} (доступ заборонено: {denied}, інший акаунт: {mismatch})",
+  "@debugError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      },
+      "denied": {
+        "type": "String"
+      },
+      "mismatch": {
+        "type": "String"
+      }
+    }
+  },
+  "debugCounters": "У черзі: {outbox} · конфлікти: {conflicts}",
+  "@debugCounters": {
+    "placeholders": {
+      "outbox": {
+        "type": "int"
+      },
+      "conflicts": {
+        "type": "int"
+      }
+    }
+  },
+  "conflictEntity": "{type} · {id}",
+  "@conflictEntity": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "id": {
+        "type": "String"
+      }
+    }
+  }
 }

@@ -21,6 +21,30 @@ Map<String, Object?> rowToJson(Map<String, Object?> row) {
   };
 }
 
+/// Даты в JSON — ISO-строки (а не миллисекунды), как в облачном payload.
+const ValueSerializer _isoSerializer =
+    ValueSerializer.defaults(serializeDateTimeValuesAsString: true);
+
+const Set<String> _dateKeys = {
+  'modified_at',
+  'deleted_at',
+  'completed_at',
+  'skipped_at',
+};
+
+/// Приведение снапшота из outbox к облачному формату: ключи snake_case,
+/// даты — ISO UTC (сервисы пишут `toJson()` с camelCase и датами в мс).
+Map<String, Object?> canonicalPayload(Map<String, Object?> payload) {
+  return {
+    for (final e in payload.entries)
+      _payloadKey(e.key): _dateKeys.contains(_payloadKey(e.key)) &&
+              e.value is int
+          ? DateTime.fromMillisecondsSinceEpoch(e.value as int, isUtc: true)
+              .toIso8601String()
+          : e.value,
+  };
+}
+
 String _payloadKey(String dartName) {
   final snake = dartName
       .replaceAllMapped(RegExp(r'([A-Z])'), (m) => '_${m.group(1)!.toLowerCase()}');
@@ -156,54 +180,70 @@ Future<int> applyPayload(
       return 1;
 
     case SyncEntityType.reminder:
+      await db.reminders.insertOnConflictUpdate(
+            RemindersCompanion.insert(
+              id: entityId,
+              taskId: payload['task_id'] as String? ?? '',
+              kind: _enumAt(ReminderKind.values, payload['kind'] as int?),
+              offsetMinutes: Value(payload['offset_minutes'] as int?),
+              localDate: Value(payload['local_date'] as String?),
+              localMinutes: Value(payload['local_minutes'] as int?),
+              snoozedUntil: Value(payload['snoozed_until'] as String?),
+              revision: Value(payload['revision'] as int? ?? 1),
+              baseRevision: Value(payload['base_revision'] as int? ?? 0),
+              modifiedAt: Value(parseDate(payload['modified_at']) ??
+                  DateTime.now().toUtc()),
+              deviceId: Value(payload['device_id'] as String? ?? ''),
+              deletedAt: Value(parseDate(payload['deleted_at'])),
+            ),
+          );
+      return 1;
+
     case SyncEntityType.recurrenceRule:
+      await db.recurrenceRules.insertOnConflictUpdate(
+            RecurrenceRulesCompanion.insert(
+              id: entityId,
+              taskId: payload['task_id'] as String? ?? '',
+              kind: _enumAt(RecurrenceKind.values, payload['kind'] as int?),
+              pattern: payload['pattern'] as String? ?? '{}',
+              revision: Value(payload['revision'] as int? ?? 1),
+              baseRevision: Value(payload['base_revision'] as int? ?? 0),
+              modifiedAt: Value(parseDate(payload['modified_at']) ??
+                  DateTime.now().toUtc()),
+              deviceId: Value(payload['device_id'] as String? ?? ''),
+              deletedAt: Value(parseDate(payload['deleted_at'])),
+            ),
+          );
+      return 1;
+
     case SyncEntityType.taskOccurrence:
-      // Эти типы наполняются на этапах повторений/напоминаний; пустые
-      // payload не доходят до сюда (outbox их не создаёт).
-      return 0;
+      await db.taskOccurrences.insertOnConflictUpdate(
+            TaskOccurrencesCompanion.insert(
+              id: entityId,
+              seriesId: payload['series_id'] as String? ?? '',
+              ordinal: payload['ordinal'] as int? ?? 0,
+              dueDate: Value(payload['due_date'] as String?),
+              dueMinutes: Value(payload['due_minutes'] as int?),
+              completedAt: Value(parseDate(payload['completed_at'])),
+              skippedAt: Value(parseDate(payload['skipped_at'])),
+              revision: Value(payload['revision'] as int? ?? 1),
+              baseRevision: Value(payload['base_revision'] as int? ?? 0),
+              modifiedAt: Value(parseDate(payload['modified_at']) ??
+                  DateTime.now().toUtc()),
+              deviceId: Value(payload['device_id'] as String? ?? ''),
+              deletedAt: Value(parseDate(payload['deleted_at'])),
+            ),
+          );
+      return 1;
   }
 }
 
-/// Физическое удаление сущности локально (для маркеров удалений после
-/// того, как локальная запись уже была удалена и вычищена).
-Future<void> hardDeleteEntity(
-  AppDatabase db,
-  SyncEntityType type,
-  String entityId,
-) async {
-  switch (type) {
-    case SyncEntityType.folder:
-      await (db.delete(db.folders)..where((f) => f.id.equals(entityId))).go();
-      break;
-    case SyncEntityType.note:
-      await (db.delete(db.notes)..where((n) => n.id.equals(entityId))).go();
-      break;
-    case SyncEntityType.taskList:
-      await (db.delete(db.taskLists)..where((l) => l.id.equals(entityId)))
-          .go();
-      break;
-    case SyncEntityType.task:
-      await (db.delete(db.tasks)..where((t) => t.id.equals(entityId))).go();
-      break;
-    case SyncEntityType.tag:
-      await (db.delete(db.tags)..where((t) => t.id.equals(entityId))).go();
-      break;
-    case SyncEntityType.entityTag:
-      final parts = entityId.split(':');
-      if (parts.length == 3) {
-        await (db.delete(db.entityTags)
-              ..where((e) => e.entityId.equals(parts[1]) &
-                  e.tagId.equals(parts[2]) &
-                  e.entityKind.equalsNullable(int.parse(parts[0]))))
-            .go();
-      }
-      break;
-    case SyncEntityType.reminder:
-    case SyncEntityType.recurrenceRule:
-    case SyncEntityType.taskOccurrence:
-      break;
-  }
-}
+/// Значение перечисления по индексу; неизвестный индекс — первый элемент
+/// (payload от более новой версии не должен ронять pull).
+T _enumAt<T>(List<T> values, int? index) =>
+    index != null && index >= 0 && index < values.length
+        ? values[index]
+        : values.first;
 
 /// Считывание текущего payload сущности для базы слияния (sync_base).
 Future<Map<String, Object?>?> readEntityPayload(
@@ -216,28 +256,28 @@ Future<Map<String, Object?>?> readEntityPayload(
     case SyncEntityType.folder:
       final f = await (db.select(db.folders)..where((x) => x.id.equals(entityId)))
           .getSingleOrNull();
-      row = f?.toJson();
+      row = f?.toJson(serializer: _isoSerializer);
       break;
     case SyncEntityType.note:
       final n = await (db.select(db.notes)..where((x) => x.id.equals(entityId)))
           .getSingleOrNull();
-      row = n?.toJson();
+      row = n?.toJson(serializer: _isoSerializer);
       break;
     case SyncEntityType.taskList:
       final l = await (db.select(db.taskLists)
             ..where((x) => x.id.equals(entityId)))
           .getSingleOrNull();
-      row = l?.toJson();
+      row = l?.toJson(serializer: _isoSerializer);
       break;
     case SyncEntityType.task:
       final t = await (db.select(db.tasks)..where((x) => x.id.equals(entityId)))
           .getSingleOrNull();
-      row = t?.toJson();
+      row = t?.toJson(serializer: _isoSerializer);
       break;
     case SyncEntityType.tag:
       final t = await (db.select(db.tags)..where((x) => x.id.equals(entityId)))
           .getSingleOrNull();
-      row = t?.toJson();
+      row = t?.toJson(serializer: _isoSerializer);
       break;
     case SyncEntityType.entityTag:
       final parts = entityId.split(':');
@@ -247,13 +287,27 @@ Future<Map<String, Object?>?> readEntityPayload(
                   x.tagId.equals(parts[2]) &
                   x.entityKind.equalsNullable(int.parse(parts[0]))))
             .getSingleOrNull();
-        row = e?.toJson();
+        row = e?.toJson(serializer: _isoSerializer);
       }
       break;
     case SyncEntityType.reminder:
+      final r = await (db.select(db.reminders)
+            ..where((x) => x.id.equals(entityId)))
+          .getSingleOrNull();
+      row = r?.toJson(serializer: _isoSerializer);
+      break;
     case SyncEntityType.recurrenceRule:
+      final r = await (db.select(db.recurrenceRules)
+            ..where((x) => x.id.equals(entityId)))
+          .getSingleOrNull();
+      row = r?.toJson(serializer: _isoSerializer);
+      break;
     case SyncEntityType.taskOccurrence:
-      return null;
+      final o = await (db.select(db.taskOccurrences)
+            ..where((x) => x.id.equals(entityId)))
+          .getSingleOrNull();
+      row = o?.toJson(serializer: _isoSerializer);
+      break;
   }
   return row == null ? null : rowToJson(row);
 }
