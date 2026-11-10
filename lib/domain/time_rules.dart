@@ -12,14 +12,22 @@ import 'due_spec.dart';
 
 final RegExp _ymdPattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
 
-/// Текущий момент в «контейнере» локальных календарных полей: UTC-зона
-/// используется только как хранилище полей (год/месяц/день/час/минуты),
-/// сравнение сроков идёт по календарю. Реальное планирование напоминаний
-/// с системной зоной — этап напоминаний.
-tz.TZDateTime localNow() {
-  final n = DateTime.now();
+/// Текущее локальное время устройства как календарные поля (§5, §6): сроки
+/// хранятся без зоны, поэтому поля системных часов переносятся в зону
+/// [tz.UTC], которая служит лишь контейнером без DST-скачков — сравнение
+/// со сроками идёт по календарю. Результат нельзя трактовать как абсолютный
+/// момент. [clock] — подмена часов (тесты).
+tz.TZDateTime localNow({DateTime? clock}) {
+  final n = (clock ?? DateTime.now()).toLocal();
   return tz.TZDateTime(
-      tz.UTC, n.year, n.month, n.day, n.hour, n.minute, n.second);
+    tz.UTC,
+    n.year,
+    n.month,
+    n.day,
+    n.hour,
+    n.minute,
+    n.second,
+  );
 }
 
 /// Разбирает `yyyy-MM-dd`; иначе бросает [ArgumentError].
@@ -32,7 +40,7 @@ tz.TZDateTime localNow() {
 }
 
 /// Форматирует локальную дату как `yyyy-MM-dd`.
-String ymdOf(tz.TZDateTime t) {
+String ymdOf(DateTime t) {
   final mm = t.month.toString().padLeft(2, '0');
   final dd = t.day.toString().padLeft(2, '0');
   return '${t.year.toString().padLeft(4, '0')}-$mm-$dd';
@@ -58,24 +66,32 @@ tz.TZDateTime endOfDayBoundary(String ymd, tz.Location loc) {
 /// Локальный момент срока (для dateTime — сам момент; для date — граница
 /// следующей полуночи). Возвращает null для [DueKind.none].
 tz.TZDateTime? dueDeadline(DueSpec due, tz.Location loc) => switch (due.kind) {
-      DueKind.none => null,
-      DueKind.date => endOfDayBoundary(due.date!, loc),
-      DueKind.dateTime => _localAt(due.date!, due.minutes!, loc),
-    };
+  DueKind.none => null,
+  DueKind.date => endOfDayBoundary(due.date!, loc),
+  DueKind.dateTime => _localAt(due.date!, due.minutes!, loc),
+};
 
 tz.TZDateTime _localAt(String ymd, int minutes, tz.Location loc) {
   final (y, m, d) = splitYmd(ymd);
-  return tz.TZDateTime(loc, int.parse(y), int.parse(m), int.parse(d),
-      minutes ~/ 60, minutes % 60);
+  return tz.TZDateTime(
+    loc,
+    int.parse(y),
+    int.parse(m),
+    int.parse(d),
+    minutes ~/ 60,
+    minutes % 60,
+  );
 }
 
 /// Задача просрочена? Для даты без времени — по следующей календарной
 /// полуночи (§5, §6). Для локальной даты-времени — по самому моменту.
 bool isOverdue(DueSpec due, tz.TZDateTime now) => switch (due.kind) {
-      DueKind.none => false,
-      DueKind.date => !now.isBefore(endOfDayBoundary(due.date!, now.location)),
-      DueKind.dateTime => !now.isBefore(_localAt(due.date!, due.minutes!, now.location)),
-    };
+  DueKind.none => false,
+  DueKind.date => !now.isBefore(endOfDayBoundary(due.date!, now.location)),
+  DueKind.dateTime => !now.isBefore(
+    _localAt(due.date!, due.minutes!, now.location),
+  ),
+};
 
 /// Остаток до срока не более [window], задача ещё не просрочена (§5: блок
 /// «Наближається термін», окно 48 часов до границы просрочки).
@@ -91,10 +107,18 @@ bool isDueWithin(DueSpec due, tz.TZDateTime now, Duration window) {
 bool isDateInWeekOf(String ymd, tz.TZDateTime anyDayOfWeek) {
   final loc = anyDayOfWeek.location;
   final daysSinceMonday = anyDayOfWeek.weekday - DateTime.monday;
-  final monday = tz.TZDateTime(loc, anyDayOfWeek.year, anyDayOfWeek.month,
-      anyDayOfWeek.day - daysSinceMonday);
-  final nextMonday =
-      tz.TZDateTime(loc, monday.year, monday.month, monday.day + 7);
+  final monday = tz.TZDateTime(
+    loc,
+    anyDayOfWeek.year,
+    anyDayOfWeek.month,
+    anyDayOfWeek.day - daysSinceMonday,
+  );
+  final nextMonday = tz.TZDateTime(
+    loc,
+    monday.year,
+    monday.month,
+    monday.day + 7,
+  );
   return !startOfDay(ymd, loc).isBefore(monday) &&
       startOfDay(ymd, loc).isBefore(nextMonday);
 }
@@ -102,25 +126,29 @@ bool isDateInWeekOf(String ymd, tz.TZDateTime anyDayOfWeek) {
 /// Календарная разница в днях между датами (`to - from`) по локальному
 /// календарю — используется при переносе сроков подзадач повторяющегося
 /// дерева (§6).
-int calendarDayDiff(String fromYmd, String toYmd) {
-  final from = _midnight(fromYmd, tz.UTC);
-  final to = _midnight(toYmd, tz.UTC);
-  return to.difference(from).inHours ~/ 24;
-}
+int calendarDayDiff(String fromYmd, String toYmd) =>
+    _utcDate(toYmd).difference(_utcDate(fromYmd)).inDays;
 
 /// Сдвиг календарной даты на [days] дней с валидацией результата.
 String shiftYmd(String ymd, int days) {
-  final shifted = _midnight(ymd, tz.UTC).add(Duration(hours: 24 * days));
-  return ymdOf(shifted);
+  final date = _utcDate(ymd);
+  return ymdOf(DateTime.utc(date.year, date.month, date.day + days));
+}
+
+/// Календарная дата как UTC-полночь: сутки в UTC всегда по 24 часа, поэтому
+/// разность и сдвиг не зависят от DST.
+DateTime _utcDate(String ymd) {
+  final (y, m, d) = splitYmd(ymd);
+  return DateTime.utc(int.parse(y), int.parse(m), int.parse(d));
 }
 
 /// Перенос срока по календарной разнице (§6): дата сдвигается, локальное
 /// время (минуты) сохраняется; без срока — остаётся без срока.
 DueSpec shiftDueByCalendarDays(DueSpec due, int days) => switch (due.kind) {
-      DueKind.none => due,
-      DueKind.date => DueSpec.dateOnly(shiftYmd(due.date!, days)),
-      DueKind.dateTime => DueSpec.at(shiftYmd(due.date!, days), due.minutes!),
-    };
+  DueKind.none => due,
+  DueKind.date => DueSpec.dateOnly(shiftYmd(due.date!, days)),
+  DueKind.dateTime => DueSpec.at(shiftYmd(due.date!, days), due.minutes!),
+};
 
 int _daysInMonth(int year, int month) {
   const lengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -149,32 +177,34 @@ int clampDayOfMonth(int year, int month, int day) {
 /// после скачка. Повторяющееся время при откате часов используется один раз —
 /// первое вхождение.
 tz.TZDateTime resolveLocalMoment(
-    int year, int month, int day, int minutes, tz.Location loc) {
+  int year,
+  int month,
+  int day,
+  int minutes,
+  tz.Location loc,
+) {
   final clampedDay = clampDayOfMonth(year, month, day);
   final hour = minutes ~/ 60;
   final minute = minutes % 60;
 
-  // Ищем самый ранний UTC-момент, у которого локальные поля совпадают с
-  // заданными: повторяющееся время (осенний откат) используется один раз —
-  // первое вхождение (§6). Если такого момента нет (DST-скачок), берём
-  // нормализацию пакета — момент после скачка.
-  final candidate =
-      tz.TZDateTime(loc, year, month, clampedDay, hour, minute);
-  final base = candidate.millisecondsSinceEpoch;
-  int? first;
-  for (var offsetMinutes = -180; offsetMinutes <= 180; offsetMinutes++) {
-    final t = base + offsetMinutes * 60000;
-    final local = tz.TZDateTime.fromMillisecondsSinceEpoch(loc, t);
-    if (local.year == year &&
-        local.month == month &&
-        local.day == clampedDay &&
-        local.hour == hour &&
-        local.minute == minute) {
-      if (first == null || t < first) first = t;
+  // Несуществующее время (DST-скачок вперёд) пакет нормализует в момент
+  // после скачка — это и есть нужный результат.
+  final candidate = tz.TZDateTime(loc, year, month, clampedDay, hour, minute);
+
+  // Повторяющееся время (осенний откат): пакет мог выбрать второе вхождение.
+  // Первое отстоит от него на разницу смещений до и после перехода.
+  final dayBefore = tz.TZDateTime.fromMillisecondsSinceEpoch(
+    loc,
+    candidate.millisecondsSinceEpoch - Duration.millisecondsPerDay,
+  );
+  final shift = dayBefore.timeZoneOffset - candidate.timeZoneOffset;
+  if (shift > Duration.zero) {
+    final earlier = candidate.subtract(shift);
+    if (earlier.hour == hour &&
+        earlier.minute == minute &&
+        earlier.day == clampedDay) {
+      return earlier;
     }
-  }
-  if (first != null) {
-    return tz.TZDateTime.fromMillisecondsSinceEpoch(loc, first);
   }
   return candidate;
 }

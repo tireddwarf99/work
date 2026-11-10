@@ -109,33 +109,33 @@ ThemeData buildDarkTheme() {
 /// Акцентный цвет срока в зависимости от темы.
 Color dueAccent(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-        ? AppColors.dueBlueDark
-        : AppColors.dueBlue;
+    ? AppColors.dueBlueDark
+    : AppColors.dueBlue;
 
 Color mutedText(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-        ? AppColors.darkMuted
-        : AppColors.lightMuted;
+    ? AppColors.darkMuted
+    : AppColors.lightMuted;
 
 Color cardBorder(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-        ? AppColors.darkBorder
-        : AppColors.lightBorder;
+    ? AppColors.darkBorder
+    : AppColors.lightBorder;
 
 Color sidebarBackground(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-        ? AppColors.darkSidebar
-        : AppColors.lightSidebar;
+    ? AppColors.darkSidebar
+    : AppColors.lightSidebar;
 
 Color chipBackground(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-        ? AppColors.darkChipBg
-        : AppColors.lightChipBg;
+    ? AppColors.darkChipBg
+    : AppColors.lightChipBg;
 
 Color accentBackground(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-        ? AppColors.darkAccentBg
-        : AppColors.lightAccentBg;
+    ? AppColors.darkAccentBg
+    : AppColors.lightAccentBg;
 
 /// Приглушённый текст второстепенных подписей (макеты).
 TextStyle? mutedStyle(BuildContext context) =>

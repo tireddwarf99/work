@@ -2,16 +2,17 @@
 /// либо задачу во «Входящих» (без выбора папки — «Без папки», §4).
 library;
 
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../db/app_database.dart';
 import '../../l10n/app_localizations.dart';
 import '../providers.dart';
 
-const MethodChannel _shareChannel =
-    MethodChannel('dev.notesapp.notes/share');
+const MethodChannel _shareChannel = MethodChannel('dev.notesapp.notes/share');
 
 /// Подключение приёма «Поделиться»; вызывает [onSharedText] для каждого
 /// полученного текста.
@@ -23,14 +24,24 @@ void registerShareHandler(void Function(String text) onSharedText) {
     }
     return null;
   });
-  // Холодный старт: интент пришёл до подключения канала.
-  _shareChannel
-      .invokeMethod<String>('getPendingSharedText')
-      .then((text) {
-    if (text != null && text.trim().isNotEmpty) {
-      onSharedText(text);
-    }
-  }).catchError((_) => null);
+  _deliverPendingText(onSharedText);
+}
+
+/// Холодный старт: интент пришёл до подключения канала. На платформах без
+/// нативной части канала нет — это не ошибка; прочие сбои пишутся в лог.
+Future<void> _deliverPendingText(
+  void Function(String text) onSharedText,
+) async {
+  try {
+    final text = await _shareChannel.invokeMethod<String>(
+      'getPendingSharedText',
+    );
+    if (text != null && text.trim().isNotEmpty) onSharedText(text);
+  } on MissingPluginException {
+    // Платформа без приёма «Поделиться».
+  } on PlatformException catch (e) {
+    debugPrint('share: pending text unavailable: ${e.code} ${e.message}');
+  }
 }
 
 /// Диалог выбора: заметка или задача во «Входящих».
@@ -40,15 +51,13 @@ Future<void> showShareTargetDialog(
   String text,
 ) async {
   final l10n = AppLocalizations.of(context)!;
+  final notes = ref.read(notesServiceProvider);
+  final tasks = ref.read(tasksServiceProvider);
   final choice = await showDialog<String>(
     context: context,
     builder: (ctx) => AlertDialog(
       title: Text(l10n.appTitle),
-      content: Text(
-        text,
-        maxLines: 4,
-        overflow: TextOverflow.ellipsis,
-      ),
+      content: Text(text, maxLines: 4, overflow: TextOverflow.ellipsis),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx, 'note'),
@@ -63,14 +72,16 @@ Future<void> showShareTargetDialog(
   );
   if (choice == null) return;
 
-  final notes = ref.watch(notesServiceProvider);
-  final tasks = ref.watch(tasksServiceProvider);
   if (choice == 'note') {
     // «Поделиться» без выбора папки ведёт в «Без папки» (§4).
     final note = await notes.create();
     await notes.saveContent(
       note.id,
-      delta: '{"ops":[{"insert":${_jsonString(text)}},{"insert":"\\n"}]}',
+      delta: jsonEncode({
+        'ops': [
+          {'insert': text.endsWith('\n') ? text : '$text\n'},
+        ],
+      }),
       title: _firstLine(text),
     );
   } else {
@@ -81,13 +92,4 @@ Future<void> showShareTargetDialog(
 String _firstLine(String text) {
   final line = text.trim().split('\n').first.trim();
   return line.isEmpty ? '…' : line;
-}
-
-String _jsonString(String value) {
-  final escaped = value
-      .replaceAll('\\', '\\\\')
-      .replaceAll('"', '\\"')
-      .replaceAll('\n', '\\n')
-      .replaceAll('\r', '');
-  return '"$escaped"';
 }

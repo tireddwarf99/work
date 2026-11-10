@@ -1,18 +1,19 @@
 /// Сессия (§9): Google-вход по платформам, Firebase-токены в защищённом
-/// хранилище ОС (Android Keystore / Windows DPAPI — flutter_secure_storage),
-/// обновление до истечения, выход с выбором сохранения локальной копии.
+/// хранилище ОС (Android Keystore через EncryptedSharedPreferences /
+/// Windows DPAPI — см. secure_store.dart), обновление до истечения,
+/// выход с выбором сохранения локальной копии.
 library;
 
 import 'dart:async';
 import 'dart:io';
-
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:uuid/uuid.dart';
-
-import 'secure_store.dart';
+import 'dart:math';
 
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:http/http.dart' as http;
+import 'package:uuid/uuid.dart';
 
 import '../cloud/firebase_config.dart';
 import '../cloud/firebase_rest.dart';
@@ -20,11 +21,14 @@ import '../db/app_database.dart';
 import '../diagnostics/diag_log.dart';
 import '../ui/providers.dart' show appDatabaseProvider;
 import 'google_oauth_desktop.dart';
+import 'secure_store.dart';
 
 class Session {
   final String uid;
   final String? email;
   final String? displayName;
+
+  /// Пустой, пока токен не получен после запуска без сети.
   final String idToken;
   final String refreshToken;
   final DateTime expiresAt;
@@ -40,6 +44,10 @@ class Session {
 
   bool get isExpiringSoon =>
       DateTime.now().toUtc().isAfter(expiresAt.subtract(const Duration(minutes: 5)));
+
+  /// Есть ли действующий ID token для запросов к облаку.
+  bool get hasValidToken =>
+      idToken.isNotEmpty && DateTime.now().toUtc().isBefore(expiresAt);
 }
 
 /// Состояние авторизации для UI.
@@ -61,6 +69,29 @@ class AuthNeedsReauth extends AuthState {
   const AuthNeedsReauth(this.email);
 }
 
+/// Коды Firebase, означающие, что refresh token больше не действителен:
+/// нужен повторный вход. Прочие ошибки (сеть, 429/5xx) — временные.
+const Set<String> _definitiveAuthCodes = {
+  'INVALID_REFRESH_TOKEN',
+  'TOKEN_EXPIRED',
+  'USER_DISABLED',
+  'USER_NOT_FOUND',
+  'MISSING_REFRESH_TOKEN',
+  'UID_MISMATCH',
+};
+
+/// Окончательный отказ в авторизации (а не временный сбой).
+@visibleForTesting
+bool isDefinitiveAuthFailure(FirebaseApiException e) =>
+    !e.retryable && _definitiveAuthCodes.contains(e.code);
+
+/// Сбой сети/TLS/таймаут — сессию сохраняем и повторяем позже.
+bool _isNetworkError(Object e) =>
+    e is SocketException ||
+    e is TlsException ||
+    e is TimeoutException ||
+    e is http.ClientException;
+
 class AuthService {
   final Ref _ref;
   final FirebaseRestClient _client;
@@ -71,14 +102,21 @@ class AuthService {
   AuthState _state = const AuthSignedOut();
   Timer? _refreshTimer;
   bool _initialized = false;
+  int _retryAttempt = 0;
 
-  AuthService(this._ref)
-      : _client = FirebaseRestClient(),
-        _storage = createSecureStore(),
-        _desktopSignIn = DesktopGoogleSignIn() {
+  AuthService(
+    this._ref, {
+    FirebaseRestClient? client,
+    SecureStore? storage,
+    DesktopGoogleSignIn? desktopSignIn,
+  })  : _client = client ?? FirebaseRestClient(),
+        _storage = storage ?? createSecureStore(),
+        _desktopSignIn = desktopSignIn ?? DesktopGoogleSignIn() {
     _client.idTokenProvider = () {
       final current = _state;
-      return current is AuthSignedIn ? current.session.idToken : null;
+      return current is AuthSignedIn && current.session.idToken.isNotEmpty
+          ? current.session.idToken
+          : null;
     };
   }
 
@@ -95,7 +133,9 @@ class AuthService {
     if (!_stateController.isClosed) _stateController.add(next);
   }
 
-  /// Запуск: восстановление сессии из защищённого хранилища.
+  /// Запуск: восстановление сессии из защищённого хранилища. Отказ в
+  /// авторизации — повторный вход; сбой сети — сессия сохраняется (данные
+  /// из хранилища), токен обновляется повторами с backoff.
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
@@ -105,17 +145,59 @@ class AuthService {
       _setState(const AuthSignedOut());
       return;
     }
+    dlog('[auth] restoring session from secure storage');
     try {
-      dlog('[auth] restoring session from secure storage');
       await _refresh(refreshToken);
       dlog('[auth] session restored');
     } on FirebaseApiException catch (e) {
-      // Истечение/отзыв доступа — требуется повторный вход (§9).
-      dlog('[auth] restore failed: ${e.message}');
-      final email = await _storage.read('auth.email');
-      await _clearCredentials();
-      _setState(AuthNeedsReauth(email));
+      if (isDefinitiveAuthFailure(e)) {
+        dlog('[auth] restore rejected: ${e.code}');
+        await _forceReauth();
+      } else {
+        dlog('[auth] restore failed (transient): ${e.message}');
+        await _restoreOffline(refreshToken);
+      }
+    } catch (e) {
+      if (!_isNetworkError(e)) rethrow;
+      dlog('[auth] restore failed (network): ${e.runtimeType}');
+      await _restoreOffline(refreshToken);
     }
+  }
+
+  /// Сессия из сохранённых данных без действующего ID token; обновление
+  /// повторится по таймеру.
+  Future<void> _restoreOffline(String refreshToken) async {
+    final uid = await _storage.read('auth.uid');
+    if (uid == null) {
+      // Без UID сессию восстановить нельзя — данные повреждены.
+      await _forceReauth();
+      return;
+    }
+    final expiresAtMs =
+        int.tryParse(await _storage.read('auth.expires_at') ?? '');
+    final session = Session(
+      uid: uid,
+      idToken: '',
+      refreshToken: refreshToken,
+      expiresAt: DateTime.fromMillisecondsSinceEpoch(expiresAtMs ?? 0,
+          isUtc: true),
+      email: await _readOptional('auth.email'),
+      displayName: await _readOptional('auth.display_name'),
+    );
+    _setState(AuthSignedIn(session));
+    _scheduleRetry();
+  }
+
+  Future<String?> _readOptional(String key) async {
+    final value = await _storage.read(key);
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  Future<void> _forceReauth() async {
+    final email = await _readOptional('auth.email');
+    _refreshTimer?.cancel();
+    await _clearCredentials();
+    _setState(AuthNeedsReauth(email));
   }
 
   /// Вход через Google: платформенный флоу, затем обмен на Firebase-токены.
@@ -145,10 +227,10 @@ class AuthService {
           DateTime.now().toUtc().add(Duration(seconds: tokens.expiresInSeconds)),
     );
     await _persist(session);
+    _retryAttempt = 0;
     _setState(AuthSignedIn(session));
     _scheduleRefresh(session);
-    dlog('[auth] sign-in OK: uid=${session.uid} '
-        'email=${session.email}');
+    dlog('[auth] sign-in OK: uid=${session.uid}');
     return session;
   }
 
@@ -172,6 +254,7 @@ class AuthService {
     await _storage.write('auth.refresh_token', session.refreshToken);
     await _storage.write('auth.uid', session.uid);
     await _storage.write('auth.email', session.email ?? '');
+    await _storage.write('auth.display_name', session.displayName ?? '');
     await _storage.write('auth.expires_at',
         session.expiresAt.millisecondsSinceEpoch.toString());
   }
@@ -179,20 +262,24 @@ class AuthService {
   Future<void> _refresh(String refreshToken) async {
     final tokens = await _client.refreshIdToken(refreshToken);
     dlog('[auth] token refreshed');
+    // Один Google-аккаунт даёт одинаковый Firebase UID на всех платформах (§9).
+    final storedUid = await _storage.read('auth.uid');
+    if (storedUid != null && storedUid != tokens.localId) {
+      throw FirebaseApiException('uid mismatch between platforms',
+          code: 'UID_MISMATCH');
+    }
     final session = Session(
       uid: tokens.localId,
       idToken: tokens.idToken,
       refreshToken: tokens.refreshToken,
       expiresAt:
           DateTime.now().toUtc().add(Duration(seconds: tokens.expiresInSeconds)),
-      email: await _storage.read('auth.email'),
+      // securetoken не возвращает профиль — сохраняем прежний.
+      email: await _readOptional('auth.email'),
+      displayName: await _readOptional('auth.display_name'),
     );
-    // Один Google-аккаунт даёт одинаковый Firebase UID на всех платформах (§9).
-    final storedUid = await _storage.read('auth.uid');
-    if (storedUid != null && storedUid != session.uid) {
-      throw FirebaseApiException('uid mismatch between platforms');
-    }
     await _persist(session);
+    _retryAttempt = 0;
     _setState(AuthSignedIn(session));
     _scheduleRefresh(session);
   }
@@ -204,19 +291,39 @@ class AuthService {
         .difference(DateTime.now().toUtc());
     _refreshTimer = Timer(
       until.isNegative ? const Duration(seconds: 30) : until,
-      () async {
-        final current = _state;
-        if (current is AuthSignedIn) {
-          try {
-            await _refresh(current.session.refreshToken);
-          } on FirebaseApiException {
-            final email = current.session.email;
-            await _clearCredentials();
-            _setState(AuthNeedsReauth(email));
-          }
-        }
-      },
+      () => unawaited(_refreshInBackground()),
     );
+  }
+
+  /// Повтор обновления с экспоненциальной задержкой (30 с … 10 мин).
+  void _scheduleRetry() {
+    _refreshTimer?.cancel();
+    final seconds = min(30 * (1 << min(_retryAttempt, 5)), 600);
+    _retryAttempt++;
+    _refreshTimer = Timer(
+      Duration(seconds: seconds),
+      () => unawaited(_refreshInBackground()),
+    );
+  }
+
+  Future<void> _refreshInBackground() async {
+    final current = _state;
+    if (current is! AuthSignedIn) return;
+    try {
+      await _refresh(current.session.refreshToken);
+    } on FirebaseApiException catch (e) {
+      if (isDefinitiveAuthFailure(e)) {
+        dlog('[auth] refresh rejected: ${e.code}');
+        await _forceReauth();
+      } else {
+        dlog('[auth] refresh failed, will retry: ${e.message}');
+        _scheduleRetry();
+      }
+    } catch (e) {
+      if (!_isNetworkError(e)) rethrow;
+      dlog('[auth] refresh failed (network), will retry');
+      _scheduleRetry();
+    }
   }
 
   /// Выход (§9): спросить, оставить ли локальную копию; облако не удаляется.
@@ -242,6 +349,7 @@ class AuthService {
       'auth.refresh_token',
       'auth.uid',
       'auth.email',
+      'auth.display_name',
       'auth.expires_at',
     ]);
   }
@@ -263,6 +371,11 @@ class AuthService {
       await db.customStatement(
           'UPDATE sync_state SET workspace_epoch = 1, commit_cursor = 0, '
           'local_counter = 0');
+      // Привязка к аккаунту снимается вместе с данными, иначе следующий
+      // вход получил бы вечный workspaceMismatch.
+      await db.customStatement(
+          'DELETE FROM device_settings WHERE `key` = ?',
+          ['sync.workspace_uid']);
     });
   }
 
@@ -277,25 +390,6 @@ class AuthService {
       modifiedAt: Value(DateTime.now().toUtc()),
     ));
   }
-
-  /// Монотонный локальный счётчик событий устройства (§10).
-  Future<int> nextLocalCounter() async {
-    final db = _ref.read(appDatabaseProvider);
-    return db.transaction(() async {
-      await db.customStatement(
-          'UPDATE sync_state SET local_counter = local_counter + 1');
-      final row = await db
-          .customSelect('SELECT local_counter FROM sync_state')
-          .getSingle();
-      return row.data['local_counter'] as int;
-    });
-  }
-
-  /// Оценка смещения от сервера (§10): разница между ответом и локальными
-  /// часами уточняется по заголовку Date ответов REST.
-  DateTime serverNow() => DateTime.now().toUtc();
-
-  String newDeviceOperationId() => const Uuid().v4();
 
   void dispose() {
     _refreshTimer?.cancel();
@@ -314,7 +408,10 @@ final authServiceProvider = Provider<AuthService>((ref) {
 /// Реактивное состояние авторизации.
 final authStateProvider = StreamProvider<AuthState>((ref) {
   final service = ref.watch(authServiceProvider);
-  // Инициализация при первом чтении состояния.
-  service.initialize();
+  // Инициализация при первом чтении состояния; сбой не должен оставаться
+  // необработанным (состояние тогда остаётся прежним).
+  unawaited(service.initialize().catchError((Object e, StackTrace s) {
+    dlog('[auth] initialize failed: $e');
+  }));
   return service.stream;
 });

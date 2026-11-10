@@ -15,8 +15,8 @@ Future<String?> showMoveNoteDialog(
   WidgetRef ref, {
   String? currentFolderId,
 }) async {
-  final folders = ref.watch(foldersServiceProvider);
-  final items = await folders.watchAllOnce();
+  final folders = ref.read(foldersServiceProvider);
+  final items = await folders.watchAll().first;
   if (!context.mounted) return null;
   final l10n = AppLocalizations.of(context)!;
   return showDialog<String>(
@@ -77,7 +77,9 @@ Future<bool> showNoteMenu(
             onTap: () => Navigator.pop(ctx, 'move'),
           ),
           ListTile(
-            leading: Icon(note.pinned ? Icons.push_pin_outlined : Icons.push_pin),
+            leading: Icon(
+              note.pinned ? Icons.push_pin_outlined : Icons.push_pin,
+            ),
             title: Text(note.pinned ? l10n.unpin : l10n.pin),
             onTap: () => Navigator.pop(ctx, 'pin'),
           ),
@@ -92,7 +94,7 @@ Future<bool> showNoteMenu(
   );
   if (action == null || !context.mounted) return false;
 
-  final notes = ref.watch(notesServiceProvider);
+  final notes = ref.read(notesServiceProvider);
   switch (action) {
     case 'move':
       final target = await showMoveNoteDialog(

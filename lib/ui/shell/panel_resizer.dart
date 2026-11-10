@@ -48,8 +48,10 @@ class _PanelResizerState extends State<PanelResizer> {
           final start = _dragStartPosition;
           if (start == null) return;
           final delta = details.globalPosition.dx - start.dx;
-          final width = (_dragStartWidth + delta)
-              .clamp(widget.minWidth, widget.maxWidth);
+          final width = (_dragStartWidth + delta).clamp(
+            widget.minWidth,
+            widget.maxWidth,
+          );
           widget.onDrag(width);
         },
         onHorizontalDragEnd: (_) => _dragStartPosition = null,
