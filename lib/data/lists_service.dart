@@ -20,17 +20,15 @@ class TaskListsService {
   /// Самостоятельный список; неназванные отображаются «Без названия» (§4).
   Future<TaskList> create({String? title}) {
     return _db.transaction(() async {
-      final order = await _nextStandaloneOrder();
       final id = _uuid.v4();
       await _db.into(_db.taskLists).insert(TaskListsCompanion.insert(
             id: id,
             title: Value(title),
-            manualOrder: Value(order),
+            manualOrder: Value(await _nextStandaloneOrder()),
             modifiedAt: Value(DateTime.now().toUtc()),
           ));
-      final created = await _get(id);
-      await _ledger.recordUpsert(SyncEntityType.taskList, id, created.toJson());
-      return created;
+      await _ledger.recordSnapshot(SyncEntityType.taskList, id);
+      return _get(id);
     });
   }
 
@@ -38,12 +36,7 @@ class TaskListsService {
   Future<TaskList> createInNote(String noteId, String embedBlockId,
       {String? title}) {
     return _db.transaction(() async {
-      final note = await (_db.select(_db.notes)
-            ..where((n) => n.id.equals(noteId)))
-          .getSingleOrNull();
-      if (note == null) {
-        throw ArgumentError.value(noteId, 'noteId', 'note does not exist');
-      }
+      await _requireNote(noteId);
       final id = _uuid.v4();
       await _db.into(_db.taskLists).insert(TaskListsCompanion.insert(
             id: id,
@@ -52,9 +45,8 @@ class TaskListsService {
             embedBlockId: Value(embedBlockId),
             modifiedAt: Value(DateTime.now().toUtc()),
           ));
-      final created = await _get(id);
-      await _ledger.recordUpsert(SyncEntityType.taskList, id, created.toJson());
-      return created;
+      await _ledger.recordSnapshot(SyncEntityType.taskList, id);
+      return _get(id);
     });
   }
 
@@ -66,22 +58,12 @@ class TaskListsService {
         throw ArgumentError(
             'noteId and embedBlockId must be set together (§3)');
       }
-      if (noteId != null) {
-        final note = await (_db.select(_db.notes)
-              ..where((n) => n.id.equals(noteId)))
-            .getSingleOrNull();
-        if (note == null) {
-          throw ArgumentError.value(noteId, 'noteId', 'note does not exist');
-        }
-      }
-      await (_db.update(_db.taskLists)..where((l) => l.id.equals(listId)))
-          .write(TaskListsCompanion(
-        noteId: Value(noteId),
-        embedBlockId: Value(embedBlockId),
-        modifiedAt: Value(DateTime.now().toUtc()),
-      ));
-      await _ledger.recordUpsert(
-          SyncEntityType.taskList, listId, (await _get(listId)).toJson());
+      if (noteId != null) await _requireNote(noteId);
+      await _mutate(
+        listId,
+        TaskListsCompanion(
+            noteId: Value(noteId), embedBlockId: Value(embedBlockId)),
+      );
     });
   }
 
@@ -103,88 +85,114 @@ class TaskListsService {
       }
       lists.insert(anchorIndex + 1, await _get(listId));
       for (var i = 0; i < lists.length; i++) {
-        await (_db.update(_db.taskLists)
-              ..where((l) => l.id.equals(lists[i].id)))
-            .write(TaskListsCompanion(manualOrder: Value(i + 1)));
+        final current = lists[i];
+        if (current.id != listId && current.manualOrder == i + 1) continue;
+        await _mutate(
+            current.id, TaskListsCompanion(manualOrder: Value(i + 1)));
       }
-      await _ledger.recordUpsert(
-          SyncEntityType.taskList, listId, (await _get(listId)).toJson());
     });
   }
 
   /// «Входящие» сверху, самостоятельные в ручном порядке (§4).
-  Future<List<TaskList>> listStandalone() =>
-      (_db.select(_db.taskLists)
-            ..where((l) =>
-                l.deletedAt.isNull() &
-                l.noteId.isNull() &
-                l.isSystem.equals(false))
-            ..orderBy([(l) => OrderingTerm.asc(l.manualOrder)]))
-          .get();
+  Future<List<TaskList>> listStandalone() => _standalone().get();
 
   /// Список «Входящие» (системный, §3).
   Future<TaskList> inbox() => _get(inboxListId);
+
   /// Реактивные самостоятельные списки (§4).
-  Stream<List<TaskList>> watchStandalone() =>
-      (_db.select(_db.taskLists)
-            ..where((l) =>
-                l.deletedAt.isNull() &
-                l.noteId.isNull() &
-                l.isSystem.equals(false))
-            ..orderBy([(l) => OrderingTerm.asc(l.manualOrder)]))
-          .watch();
+  Stream<List<TaskList>> watchStandalone() => _standalone().watch();
 
   /// Реактивные списки, встроенные в заметку.
   Stream<List<TaskList>> watchInNote(String noteId) =>
-      (_db.select(_db.taskLists)
-            ..where((l) => l.noteId.equals(noteId) & l.deletedAt.isNull())
-            ..orderBy([(l) => OrderingTerm.asc(l.manualOrder)]))
-          .watch();
-
+      _inNote(noteId).watch();
 
   /// Списки, встроенные в заметку.
-  Future<List<TaskList>> listInNote(String noteId) =>
-      (_db.select(_db.taskLists)
-            ..where((l) => l.noteId.equals(noteId) & l.deletedAt.isNull())
-            ..orderBy([(l) => OrderingTerm.asc(l.manualOrder)]))
-          .get();
+  Future<List<TaskList>> listInNote(String noteId) => _inNote(noteId).get();
 
   Future<TaskList> get(String id) => _get(id);
 
+  /// Корзина: список уходит вместе со всеми своими задачами (§11), в один
+  /// момент — по нему восстановление отличает задачи, удалённые со списком,
+  /// от удалённых раньше. «Входящие» удалить нельзя (§3).
   Future<void> moveToTrash(String listId) {
     return _db.transaction(() async {
+      final list = await _get(listId);
+      if (list.isSystem) {
+        throw ArgumentError.value(listId, 'listId', 'system list (§3)');
+      }
       final now = DateTime.now().toUtc();
+      final taskIds = await _activeTaskIds(listId);
+      await (_db.update(_db.tasks)..where((t) => t.id.isIn(taskIds)))
+          .write(TasksCompanion(deletedAt: Value(now)));
+      for (final id in taskIds) {
+        await _ledger.recordTrashed(SyncEntityType.task, id);
+      }
       await (_db.update(_db.taskLists)..where((l) => l.id.equals(listId)))
-          .write(TaskListsCompanion(deletedAt: Value(now), modifiedAt: Value(now)));
-      await _ledger.recordDeletion(SyncEntityType.taskList, listId);
-      // Задачи списка уходят в корзину отдельно решением пользователя (§11);
-      // самостоятельный список без задач сохраняется в корзине как строка.
+          .write(TaskListsCompanion(deletedAt: Value(now)));
+      await _ledger.recordTrashed(SyncEntityType.taskList, listId);
     });
   }
 
+  /// Восстановление списка и задач, удалённых вместе с ним (§11).
   Future<void> restoreFromTrash(String listId) {
     return _db.transaction(() async {
+      final list = await _get(listId);
+      final trashedAt = list.deletedAt;
       await (_db.update(_db.taskLists)..where((l) => l.id.equals(listId)))
-          .write(TaskListsCompanion(
-              deletedAt: Value(null),
-              modifiedAt: Value(DateTime.now().toUtc())));
-      await _ledger.recordUpsert(
-          SyncEntityType.taskList, listId, (await _get(listId)).toJson());
+          .write(TaskListsCompanion(deletedAt: Value(null)));
+      await _ledger.recordChange(SyncEntityType.taskList, listId);
+      if (trashedAt == null) return;
+      final taskIds = await (_db.selectOnly(_db.tasks)
+            ..addColumns([_db.tasks.id])
+            ..where(_db.tasks.listId.equals(listId) &
+                _db.tasks.deletedAt.equals(trashedAt)))
+          .map((r) => r.read(_db.tasks.id)!)
+          .get();
+      await (_db.update(_db.tasks)..where((t) => t.id.isIn(taskIds)))
+          .write(TasksCompanion(deletedAt: Value(null)));
+      for (final id in taskIds) {
+        await _ledger.recordChange(SyncEntityType.task, id);
+      }
     });
   }
 
   // --- внутренние ---
 
+  SimpleSelectStatement<$TaskListsTable, TaskList> _standalone() =>
+      _db.select(_db.taskLists)
+        ..where((l) =>
+            l.deletedAt.isNull() &
+            l.noteId.isNull() &
+            l.isSystem.equals(false))
+        ..orderBy([(l) => OrderingTerm.asc(l.manualOrder)]);
+
+  SimpleSelectStatement<$TaskListsTable, TaskList> _inNote(String noteId) =>
+      _db.select(_db.taskLists)
+        ..where((l) => l.noteId.equals(noteId) & l.deletedAt.isNull())
+        ..orderBy([(l) => OrderingTerm.asc(l.manualOrder)]);
+
+  Future<List<String>> _activeTaskIds(String listId) =>
+      (_db.selectOnly(_db.tasks)
+            ..addColumns([_db.tasks.id])
+            ..where(_db.tasks.listId.equals(listId) &
+                _db.tasks.deletedAt.isNull()))
+          .map((r) => r.read(_db.tasks.id)!)
+          .get();
+
+  Future<void> _requireNote(String noteId) async {
+    final note = await (_db.select(_db.notes)
+          ..where((n) => n.id.equals(noteId)))
+        .getSingleOrNull();
+    if (note == null) {
+      throw ArgumentError.value(noteId, 'noteId', 'note does not exist');
+    }
+  }
+
   Future<void> _mutate(String listId, TaskListsCompanion changes) {
     return _db.transaction(() async {
       await (_db.update(_db.taskLists)..where((l) => l.id.equals(listId)))
-          .write(changes.copyWith(
-              modifiedAt: Value(DateTime.now().toUtc())));
-      await _db.customStatement(
-          'UPDATE task_lists SET revision = revision + 1 WHERE id = ?',
-          [listId]);
-      await _ledger.recordUpsert(
-          SyncEntityType.taskList, listId, (await _get(listId)).toJson());
+          .write(changes);
+      await _ledger.recordChange(SyncEntityType.taskList, listId);
     });
   }
 

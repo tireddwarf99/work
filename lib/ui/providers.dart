@@ -34,10 +34,8 @@ final foldersServiceProvider = Provider(
     (ref) => FoldersService(ref.watch(appDatabaseProvider), _ledger(ref)));
 final tagsServiceProvider =
     Provider((ref) => TagsService(ref.watch(appDatabaseProvider), _ledger(ref)));
-final trashServiceProvider = Provider((ref) => TrashService(
-      ref.watch(appDatabaseProvider),
-      OutboxLedger(ref.watch(appDatabaseProvider)),
-    ));
+final trashServiceProvider = Provider(
+    (ref) => TrashService(ref.watch(appDatabaseProvider), _ledger(ref)));
 final searchServiceProvider =
     Provider((ref) => SearchService(ref.watch(appDatabaseProvider)));
 final settingsServiceProvider =
@@ -55,18 +53,23 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
   }
 
   Future<void> _load() async {
-    // getString; старые версии хранили JSON-строку ('"dark"') — совместимость.
-    var raw = await ref.read(settingsServiceProvider).getString('theme');
-    if (raw == null) {
-      raw = await ref.read(settingsServiceProvider).getDevice('theme');
-      if (raw != null) raw = raw.replaceAll('"', '');
+    try {
+      // getString; старые версии хранили JSON-строку ('"dark"') — совместимость.
+      var raw = await ref.read(settingsServiceProvider).getString('theme');
+      if (raw == null) {
+        raw = await ref.read(settingsServiceProvider).getDevice('theme');
+        if (raw != null) raw = raw.replaceAll('"', '');
+      }
+      if (raw == null || !ref.mounted) return;
+      state = switch (raw) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
+    } catch (e, st) {
+      // Без сохранённой темы остаётся системная.
+      debugPrint('theme load failed: $e\n$st');
     }
-    if (raw == null) return;
-    state = switch (raw) {
-      'light' => ThemeMode.light,
-      'dark' => ThemeMode.dark,
-      _ => ThemeMode.system,
-    };
   }
 
   Future<void> set(ThemeMode mode) async {
@@ -92,13 +95,18 @@ class LocaleNotifier extends Notifier<Locale?> {
   }
 
   Future<void> _load() async {
-    var raw = await ref.read(settingsServiceProvider).getString('locale');
-    if (raw == null) {
-      raw = await ref.read(settingsServiceProvider).getDevice('locale');
-      if (raw != null) raw = raw.replaceAll('"', '');
+    try {
+      var raw = await ref.read(settingsServiceProvider).getString('locale');
+      if (raw == null) {
+        raw = await ref.read(settingsServiceProvider).getDevice('locale');
+        if (raw != null) raw = raw.replaceAll('"', '');
+      }
+      if (raw == null || !ref.mounted) return;
+      state = raw.isEmpty ? null : Locale(raw);
+    } catch (e, st) {
+      // Без сохранённого языка остаётся системный.
+      debugPrint('locale load failed: $e\n$st');
     }
-    if (raw == null) return;
-    state = raw.isEmpty ? null : Locale(raw);
   }
 
   Future<void> set(Locale? locale) async {
