@@ -1,0 +1,65 @@
+rules_version = '2';
+
+// Security Rules (§9): deny by default — доступ только к workspace владельца.
+// UID владельца вшит (см. docs/cloud-setup.md). Вне /workspaces доступ
+// запрещён автоматически: непокрытые пути deny by default, отдельный
+// catch-all `if false` не нужен (перекрывающиеся allow объединяются по OR).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) {
+      return request.auth != null
+        && request.auth.uid == uid
+        && request.auth.uid == '2fANEOpUDmczCaVAhb6FF36iBL93';
+    }
+
+    // Workspace: либо создание {active_epoch, commit_seq}, либо обновление
+    // счётчика {commit_seq}. Счётчик — неотрицательное целое.
+    function validWorkspace() {
+      let d = request.resource.data;
+      return d.keys().hasAll(['commit_seq'])
+        && d.keys().hasOnly(['commit_seq', 'active_epoch'])
+        && d.commit_seq is int
+        && d.commit_seq >= 0
+        && (d.active_epoch == null || (d.active_epoch is int && d.active_epoch >= 1));
+    }
+
+    // Entity-документ: фиксированный набор полей протокола (§10), целые
+    // неотрицательные ревизии/счётчики, строки для payload/времени.
+    function validEntity() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['type', 'revision', 'base_revision',
+                               'commit_seq', 'modified_at', 'deleted',
+                               'device_id', 'payload', 'last_op_id'])
+        && d.keys().hasAll(['type', 'revision', 'base_revision',
+                            'commit_seq', 'modified_at', 'deleted',
+                            'device_id', 'payload', 'last_op_id'])
+        && d.type is int
+        && d.revision is int && d.revision >= 1
+        && d.base_revision is int && d.base_revision >= 0
+        && d.commit_seq is int && d.commit_seq >= 0
+        && d.modified_at is string
+        && d.deleted is bool
+        && d.device_id is string
+        && d.payload is string
+        && d.last_op_id is string;
+    }
+
+    match /workspaces/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && validWorkspace();
+      allow update: if isOwner(uid) && validWorkspace();
+      allow delete: if false;
+
+      match /epochs/{epoch}/entities/{entityId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validEntity();
+        allow delete: if false;
+      }
+
+      // Прочие пути workspace (на будущее) — только владелец.
+      match /{sub=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+  }
+}

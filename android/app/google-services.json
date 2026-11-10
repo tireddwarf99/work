@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "801436414302",
+    "project_id": "dwarfs-life-app",
+    "storage_bucket": "dwarfs-life-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:801436414302:android:88875266d9acc38e9bdfcf",
+        "android_client_info": {
+          "package_name": "com.hyrladzhyu.life.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "801436414302-ns7bm8c77i437u5fekgekchms8rh3u80.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.hyrladzhyu.life.app",
+            "certificate_hash": "2d764cbac2a4c38b37ab466f797cddb3c6cb96f2"
+          }
+        },
+        {
+          "client_id": "801436414302-5u53dja2749jvk183kjqc05ocf0oji49.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCc5So0JZrwbL7tPpmRb7dKnqWyAYQpxSc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "801436414302-5u53dja2749jvk183kjqc05ocf0oji49.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
