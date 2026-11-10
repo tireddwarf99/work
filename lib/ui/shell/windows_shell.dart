@@ -4,8 +4,6 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-import 'panel_resizer.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/auth_service.dart';
@@ -13,15 +11,18 @@ import '../../db/app_database.dart';
 import '../../l10n/app_localizations.dart';
 import '../../sync/sync_engine.dart';
 import '../app_theme.dart';
+import '../common/sync_label.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../editor/note_editor.dart';
 import '../lists/lists_screen.dart';
+import '../notes/folder_actions.dart';
 import '../notes/notes_pane.dart';
 import '../providers.dart';
 import '../search_screen.dart';
 import '../settings_screen.dart';
 import '../task_details/task_details.dart';
 import '../trash_screen.dart';
+import 'panel_resizer.dart';
 
 enum WindowsSection { dashboard, notes, lists, trash, search, settings }
 
@@ -60,58 +61,56 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
       bindings: {
         // Windows shortcuts (§8): Ctrl+N — заметка, Ctrl+K — поиск,
         // Esc — закрытие панели деталей.
-        SingleActivator(LogicalKeyboardKey.keyN, control: true): _createNote,
-        SingleActivator(LogicalKeyboardKey.keyK, control: true): () =>
-            setState(() {
-              _section = WindowsSection.search;
-            }),
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true):
+            _createNote,
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () =>
+            setState(() => _section = WindowsSection.search),
         const SingleActivator(LogicalKeyboardKey.escape): () =>
             ref.read(windowsTaskPanelProvider.notifier).close(),
       },
       child: Focus(
         autofocus: true,
         child: Scaffold(
-      body: Row(
-        children: [
-          SizedBox(width: _navWidth, child: _buildNav(context, l10n)),
-          PanelResizer(
-            startWidth: _navWidth,
-            onDrag: (w) => setState(() => _navWidth = w),
-          ),
-          VerticalDivider(width: 1, color: cardBorder(context)),
-          // Средняя панель: перечень заметок либо содержимое раздела.
-          SizedBox(
-            width: _listWidth,
-            child: _buildMiddle(context, l10n),
-          ),
-          PanelResizer(
-            startWidth: _listWidth,
-            onDrag: (w) => setState(() => _listWidth = w),
-          ),
-          VerticalDivider(width: 1, color: cardBorder(context)),
-          // Правая рабочая область: редактор/список/поиск.
-          Expanded(
-            child: _buildWorkArea(context, l10n),
-          ),
-          // Детали задачи — правая боковая панель (§8).
-          if (panelTaskId != null) ...[
-            PanelResizer(
-              startWidth: _panelWidth,
-              minWidth: 280,
-              onDrag: (w) => setState(() => _panelWidth = w),
-            ),
-            VerticalDivider(width: 1, color: cardBorder(context)),
-            SizedBox(
-              width: _panelWidth,
-              child: TaskDetails(
-                taskId: panelTaskId,
-                onClose: () =>
-                    ref.read(windowsTaskPanelProvider.notifier).close(),
+          body: Row(
+            children: [
+              SizedBox(width: _navWidth, child: _buildNav(context, l10n)),
+              PanelResizer(
+                startWidth: _navWidth,
+                onDrag: (w) => setState(() => _navWidth = w),
               ),
-            ),
-          ],
-        ],
-      ),
+              VerticalDivider(width: 1, color: cardBorder(context)),
+              // Средняя панель: перечень заметок либо содержимое раздела.
+              SizedBox(
+                width: _listWidth,
+                child: _buildMiddle(context, l10n),
+              ),
+              PanelResizer(
+                startWidth: _listWidth,
+                onDrag: (w) => setState(() => _listWidth = w),
+              ),
+              VerticalDivider(width: 1, color: cardBorder(context)),
+              // Правая рабочая область: редактор/список/поиск.
+              Expanded(child: _buildWorkArea(context, l10n)),
+              // Детали задачи — правая боковая панель (§8).
+              if (panelTaskId != null) ...[
+                PanelResizer(
+                  startWidth: _panelWidth,
+                  minWidth: 280,
+                  onDrag: (w) => setState(() => _panelWidth = w),
+                ),
+                VerticalDivider(width: 1, color: cardBorder(context)),
+                SizedBox(
+                  width: _panelWidth,
+                  child: TaskDetails(
+                    key: ValueKey(panelTaskId),
+                    taskId: panelTaskId,
+                    onClose: () =>
+                        ref.read(windowsTaskPanelProvider.notifier).close(),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
@@ -119,7 +118,6 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
 
   Widget _buildNav(BuildContext context, AppLocalizations l10n) {
     return Container(
-      width: 240,
       color: sidebarBackground(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -139,7 +137,7 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
               width: double.infinity,
               child: FilledButton.icon(
                 icon: const Icon(Icons.add, size: 18),
-                label: Text(l10n.create),
+                label: Text(l10n.newNote),
                 onPressed: _createNote,
               ),
             ),
@@ -149,9 +147,7 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
             icon: Icons.search,
             label: l10n.search,
             selected: _section == WindowsSection.search,
-            onTap: () => setState(() {
-              _section = WindowsSection.search;
-            }),
+            onTap: () => setState(() => _section = WindowsSection.search),
           ),
           _NavItem(
             icon: Icons.grid_view,
@@ -184,21 +180,31 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
           ),
           const SizedBox(height: 12),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              l10n.folders,
-              style: mutedStyle(context)
-                  ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: 1),
+            padding: const EdgeInsets.only(left: 16, right: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    l10n.folders,
+                    style: mutedStyle(context)?.copyWith(
+                        fontWeight: FontWeight.w700, letterSpacing: 1),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+                  tooltip: l10n.newFolder,
+                  onPressed: _createFolder,
+                ),
+              ],
             ),
           ),
           Expanded(
             child: _FolderList(
               selectedFolderId: _selectedFolderId,
-              onFolderSelected: (id) => setState(() {
-                _section = WindowsSection.notes;
-                _selectedFolderId = id;
-                _selectedNoteId = null;
-              }),
+              onFolderSelected: _selectFolder,
+              onFolderDeleted: (id) {
+                if (_selectedFolderId == id) _selectFolder(null);
+              },
             ),
           ),
           Divider(height: 1, color: cardBorder(context)),
@@ -216,6 +222,17 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
     );
   }
 
+  void _selectFolder(String? id) => setState(() {
+        _section = WindowsSection.notes;
+        _selectedFolderId = id;
+        _selectedNoteId = null;
+      });
+
+  Future<void> _createFolder() async {
+    final folder = await createFolder(context, ref);
+    if (folder != null && mounted) _selectFolder(folder.id);
+  }
+
   Widget _buildMiddle(BuildContext context, AppLocalizations l10n) {
     switch (_section) {
       case WindowsSection.notes:
@@ -226,7 +243,6 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
         );
       case WindowsSection.lists:
         return ListsScreen(
-          openListId: _openListId,
           onOpenList: (id) => setState(() => _openListId = id),
           onOpenTask: (taskId) =>
               ref.read(windowsTaskPanelProvider.notifier).open(taskId),
@@ -265,22 +281,28 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
   Widget _buildWorkArea(BuildContext context, AppLocalizations l10n) {
     switch (_section) {
       case WindowsSection.notes:
-        if (_selectedNoteId != null) {
+        final noteId = _selectedNoteId;
+        if (noteId != null) {
           return NoteEditor(
-            noteId: _selectedNoteId!,
+            key: ValueKey(noteId),
+            noteId: noteId,
             onOpenTask: (task) =>
                 ref.read(windowsTaskPanelProvider.notifier).open(task.id),
           );
         }
         return Center(
-          child: Text(
-            l10n.emptyNotesHint,
-            style: mutedStyle(context),
-          ),
+          child: Text(l10n.emptyNotesHint, style: mutedStyle(context)),
         );
       case WindowsSection.lists:
-        if (_openListId != null) {
-          return NoteEditorHostForList(listId: _openListId!);
+        final listId = _openListId;
+        if (listId != null) {
+          return ListDetailScreen(
+            key: ValueKey(listId),
+            listId: listId,
+            onOpenTask: (task) =>
+                ref.read(windowsTaskPanelProvider.notifier).open(task.id),
+            onDeleted: () => setState(() => _openListId = null),
+          );
         }
         return const SizedBox.shrink();
       case WindowsSection.dashboard:
@@ -288,7 +310,9 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
           onOpenTask: (id) =>
               ref.read(windowsTaskPanelProvider.notifier).open(id),
         );
-      default:
+      case WindowsSection.trash:
+      case WindowsSection.search:
+      case WindowsSection.settings:
         return const SizedBox.shrink();
     }
   }
@@ -297,6 +321,7 @@ class _WindowsShellState extends ConsumerState<WindowsShell> {
     final notes = ref.read(notesServiceProvider);
     final note =
         await notes.create(folderId: folderIdFromSentinel(_selectedFolderId));
+    if (!mounted) return;
     setState(() {
       _section = WindowsSection.notes;
       _selectedNoteId = note.id;
@@ -309,12 +334,14 @@ class _NavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final Widget? trailing;
 
   const _NavItem({
     required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
+    this.trailing,
   });
 
   @override
@@ -326,7 +353,8 @@ class _NavItem extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: EdgeInsets.only(
+              left: 12, right: trailing == null ? 12 : 4, top: 10, bottom: 10),
           decoration: BoxDecoration(
             color: selected ? accentBackground(context) : null,
             borderRadius: BorderRadius.circular(8),
@@ -338,14 +366,20 @@ class _NavItem extends StatelessWidget {
                   color:
                       selected ? theme.colorScheme.primary : mutedText(context)),
               const SizedBox(width: 12),
-              Text(
-                label,
-                style: TextStyle(
-                  color:
-                      selected ? theme.colorScheme.primary : theme.textTheme.bodyMedium?.color,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected
+                        ? theme.colorScheme.primary
+                        : theme.textTheme.bodyMedium?.color,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  ),
                 ),
               ),
+              if (trailing != null) trailing!,
             ],
           ),
         ),
@@ -357,10 +391,12 @@ class _NavItem extends StatelessWidget {
 class _FolderList extends ConsumerWidget {
   final String? selectedFolderId;
   final void Function(String? folderId) onFolderSelected;
+  final void Function(String folderId) onFolderDeleted;
 
   const _FolderList({
     required this.selectedFolderId,
     required this.onFolderSelected,
+    required this.onFolderDeleted,
   });
 
   @override
@@ -383,6 +419,23 @@ class _FolderList extends ConsumerWidget {
                 onAcceptNote: (noteId) => ref
                     .read(notesServiceProvider)
                     .moveToFolder(noteId, folder.id),
+                trailing: PopupMenuButton<FolderAction>(
+                  icon: const Icon(Icons.more_vert, size: 16),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 28, minHeight: 28),
+                  itemBuilder: (_) => folderMenuItems(l10n),
+                  onSelected: (action) async {
+                    switch (action) {
+                      case FolderAction.rename:
+                        await renameFolder(context, ref, folder);
+                      case FolderAction.delete:
+                        if (await deleteFolder(context, ref, folder)) {
+                          onFolderDeleted(folder.id);
+                        }
+                    }
+                  },
+                ),
               ),
             _DropNavItem(
               icon: Icons.folder_open,
@@ -399,21 +452,6 @@ class _FolderList extends ConsumerWidget {
   }
 }
 
-class NoteEditorHostForList extends ConsumerWidget {
-  final String listId;
-
-  const NoteEditorHostForList({super.key, required this.listId});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Список без заметки отображается в средней панели; рабочая область
-    // пуста. Переход к списку в заметке открывает заметку (§4) — реализовано
-    // через NotesPane.
-    return const SizedBox.shrink();
-  }
-}
-
-
 /// Пункт навигации, принимающий перетаскиваемые заметки (§4):
 /// перемещение в папку, «Без папки» или в корзину.
 class _DropNavItem extends StatelessWidget {
@@ -422,6 +460,7 @@ class _DropNavItem extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final void Function(String noteId) onAcceptNote;
+  final Widget? trailing;
 
   const _DropNavItem({
     required this.icon,
@@ -429,6 +468,7 @@ class _DropNavItem extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.onAcceptNote,
+    this.trailing,
   });
 
   @override
@@ -450,6 +490,7 @@ class _DropNavItem extends StatelessWidget {
             label: label,
             selected: selected,
             onTap: onTap,
+            trailing: trailing,
           ),
         );
       },
@@ -457,7 +498,6 @@ class _DropNavItem extends StatelessWidget {
     );
   }
 }
-
 
 /// Статус синхронизации в нижней части навигации (макет: «Синхронізовано»)
 /// с индикатором нерешённых конфликтов (§10).
@@ -467,55 +507,62 @@ class _SyncStatusLine extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    final authAsync = ref.watch(authStateProvider);
-    final syncAsync = ref.watch(syncStatusProvider);
-    final authState = authAsync.value ?? const AuthSignedOut();
-    final sync = syncAsync.value ?? const SyncStatus();
-
+    final authState =
+        ref.watch(authStateProvider).value ?? const AuthSignedOut();
+    final sync = ref.watch(syncStatusProvider).value ?? const SyncStatus();
     final db = ref.watch(appDatabaseProvider);
+    final signedIn = authState is AuthSignedIn;
+
+    final IconData icon;
+    final String label;
+    if (!signedIn) {
+      icon = Icons.cloud_off;
+      label = l10n.syncOff;
+    } else {
+      icon = syncNeedsAttention(sync)
+          ? Icons.sync_problem
+          : sync.running
+              ? Icons.sync
+              : sync.pendingOps > 0 || sync.lastSyncAt == null
+                  ? Icons.cloud_upload_outlined
+                  : Icons.cloud_done;
+      label = syncStatusLabel(l10n, sync);
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          Icon(
-            authState is! AuthSignedIn
-                ? Icons.cloud_off
-                : sync.error != null
-                    ? Icons.sync_problem
-                    : Icons.cloud_done,
-            size: 14,
-            color: mutedText(context),
-          ),
+          Icon(icon, size: 14, color: mutedText(context)),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              authState is! AuthSignedIn
-                  ? l10n.syncOff
-                  : sync.error != null
-                      ? l10n.syncError
-                      : l10n.synced,
+              label,
               style: mutedStyle(context),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           StreamBuilder<int>(
-            stream: (db.select(db.conflicts)).watch().map((r) => r.length),
+            stream: db.select(db.conflicts).watch().map((r) => r.length),
             builder: (context, snap) {
               final n = snap.data ?? 0;
               if (n == 0) return const SizedBox.shrink();
-              return Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '$n',
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: Theme.of(context).colorScheme.onErrorContainer),
+              return Tooltip(
+                message: l10n.conflicts,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '$n',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onErrorContainer),
+                  ),
                 ),
               );
             },

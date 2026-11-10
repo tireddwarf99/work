@@ -8,25 +8,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/tasks_service.dart';
 import '../../db/app_database.dart';
+import '../../l10n/app_localizations.dart';
 import '../providers.dart';
 import 'platform_drag.dart';
 
 /// Перенос задачи при броске на другую задачу.
 ///
 /// Верхняя половина строки — сосед перед целью, нижняя — вложить ребёнком.
-/// Существующий ручной порядок соседи сохраняют.
-Future<void> dropTaskOnTask(
+/// Существующий ручной порядок соседи сохраняют. Возвращает false, если
+/// сервис запретил перенос (цикл §4, родитель из другого списка §3).
+Future<bool> dropTaskOnTask(
   TasksService tasks,
   Task dragged,
   Task target,
   List<Task> allTasks, {
   required bool asChild,
 }) async {
-  if (dragged.id == target.id) return;
+  if (dragged.id == target.id) return true;
   final newParentId = asChild ? target.id : target.parentId;
   try {
-    final alreadyPlaced = dragged.listId == target.listId &&
-        dragged.parentId == newParentId;
+    final alreadyPlaced =
+        dragged.listId == target.listId && dragged.parentId == newParentId;
     if (!alreadyPlaced) {
       await tasks.moveBranch(
         dragged.id,
@@ -39,44 +41,50 @@ Future<void> dropTaskOnTask(
         .toList()
       ..sort((a, b) => a.manualOrder.compareTo(b.manualOrder));
     if (asChild) {
-      final children = allTasks
-          .where((t) => t.parentId == target.id && t.id != dragged.id)
-          .toList()
-        ..sort((a, b) => a.manualOrder.compareTo(b.manualOrder));
-      await tasks.reorder(
-          dragged.id, afterId: children.isEmpty ? null : children.last.id);
-      return;
+      await tasks.reorder(dragged.id,
+          afterId: siblings.isEmpty ? null : siblings.last.id);
+      return true;
     }
     final targetIndex = siblings.indexWhere((t) => t.id == target.id);
     final prevId = targetIndex > 0 ? siblings[targetIndex - 1].id : null;
     await tasks.reorder(dragged.id, afterId: prevId);
+    return true;
   } on StateError {
-    // Циклический перенос запрещён (§4).
+    return false;
   } on ArgumentError {
-    // Несовместимый перенос (родитель в другом списке) — запрещён (§3).
+    return false;
   }
 }
 
 /// Строка задачи с drag-and-drop: перетаскивается и принимает перетаскивание.
+/// При [reorderEnabled] == false (сортировка не ручная) верхняя зона
+/// «перед» отключена — порядок определяет сортировка, а не пользователь.
 class TaskDndRow extends ConsumerWidget {
   final Task task;
   final List<Task> allTasks;
   final Widget child;
-  final VoidCallback onToggle;
-  final VoidCallback onOpen;
+  final bool reorderEnabled;
 
   const TaskDndRow({
     super.key,
     required this.task,
     required this.allTasks,
     required this.child,
-    required this.onToggle,
-    required this.onOpen,
+    this.reorderEnabled = true,
   });
+
+  Future<void> _drop(BuildContext context, WidgetRef ref, Task dragged,
+      {required bool asChild}) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final message = AppLocalizations.of(context)!.dropForbidden;
+    final ok = await dropTaskOnTask(
+        ref.read(tasksServiceProvider), dragged, task, allTasks,
+        asChild: asChild);
+    if (!ok) messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tasks = ref.watch(tasksServiceProvider);
     return PlatformDraggable<Task>(
       data: task,
       feedback: dragFeedbackCard(
@@ -87,86 +95,69 @@ class TaskDndRow extends ConsumerWidget {
           leading: const Icon(Icons.check_box_outline_blank, size: 20),
         ),
       ),
-      child: DragTarget<Task>(
-        builder: (context, candidates, rejected) {
-          return Stack(
-            children: [
-              child,
-              // Две зоны приёма: верхняя — «перед», нижняя — «внутрь».
-              Positioned.fill(
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: DragTarget<Task>(
-                        builder: (context, candidates, _) => _ZoneLine(
-                          visible: candidates.isNotEmpty,
-                          context: context,
+      child: Stack(
+        children: [
+          child,
+          // Две зоны приёма: верхняя — «перед», нижняя — «внутрь».
+          Positioned.fill(
+            child: Column(
+              children: [
+                Expanded(
+                  child: reorderEnabled
+                      ? _DropZone(
                           atTop: true,
-                        ),
-                        onWillAcceptWithDetails: (d) =>
-                            d.data.id != task.id,
-                        onAcceptWithDetails: (d) => dropTaskOnTask(
-                            tasks, d.data, task, allTasks,
-                            asChild: false),
-                      ),
-                    ),
-                    Expanded(
-                      child: DragTarget<Task>(
-                        builder: (context, candidates, _) => _ZoneLine(
-                          visible: candidates.isNotEmpty,
-                          context: context,
-                          atTop: false,
-                        ),
-                        onWillAcceptWithDetails: (d) =>
-                            d.data.id != task.id,
-                        onAcceptWithDetails: (d) => dropTaskOnTask(
-                            tasks, d.data, task, allTasks,
-                            asChild: true),
-                      ),
-                    ),
-                  ],
+                          onWillAccept: (d) => d.id != task.id,
+                          onAccept: (d) =>
+                              _drop(context, ref, d, asChild: false),
+                        )
+                      : const SizedBox.expand(),
                 ),
-              ),
-            ],
-          );
-        },
+                Expanded(
+                  child: _DropZone(
+                    atTop: false,
+                    onWillAccept: (d) => d.id != task.id,
+                    onAccept: (d) => _drop(context, ref, d, asChild: true),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _ZoneLine extends StatelessWidget {
-  final bool visible;
-  final BuildContext context;
+class _DropZone extends StatelessWidget {
   final bool atTop;
+  final bool Function(Task dragged) onWillAccept;
+  final void Function(Task dragged) onAccept;
 
-  const _ZoneLine({
-    required this.visible,
-    required this.context,
+  const _DropZone({
     required this.atTop,
+    required this.onWillAccept,
+    required this.onAccept,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (!visible) return const SizedBox.expand();
-    return Padding(
-      padding: EdgeInsets.only(top: atTop ? 0 : 0, bottom: 0),
-      child: Align(
-        alignment: atTop ? Alignment.topCenter : Alignment.bottomCenter,
-        child: Container(
-          height: 3,
-          margin: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary,
-            borderRadius: BorderRadius.circular(2),
+    return DragTarget<Task>(
+      onWillAcceptWithDetails: (d) => onWillAccept(d.data),
+      onAcceptWithDetails: (d) => onAccept(d.data),
+      builder: (context, candidates, _) {
+        if (candidates.isEmpty) return const SizedBox.expand();
+        return Align(
+          alignment: atTop ? Alignment.topCenter : Alignment.bottomCenter,
+          child: Container(
+            height: 3,
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
-
-/// Подсветка цели при перетаскивании.
-Color dropHighlight(BuildContext context, bool hovered) => hovered
-    ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.5)
-    : Colors.transparent;
