@@ -20,7 +20,7 @@ service cloud.firestore {
         && d.keys().hasOnly(['commit_seq', 'active_epoch'])
         && d.commit_seq is int
         && d.commit_seq >= 0
-        && (d.active_epoch == null || (d.active_epoch is int && d.active_epoch >= 1));
+        && (!('active_epoch' in d) || (d.active_epoch is int && d.active_epoch >= 1));
     }
 
     // Entity-документ: фиксированный набор полей протокола (§10), целые
@@ -50,15 +50,13 @@ service cloud.firestore {
       allow update: if isOwner(uid) && validWorkspace();
       allow delete: if false;
 
+      // Единственная подколлекция клиента. Универсальный `{sub=**}` не нужен:
+      // по OR он отменял бы validEntity() и запрет удаления; прочие пути
+      // остаются закрытыми (deny by default).
       match /epochs/{epoch}/entities/{entityId} {
         allow read: if isOwner(uid);
         allow create, update: if isOwner(uid) && validEntity();
         allow delete: if false;
-      }
-
-      // Прочие пути workspace (на будущее) — только владелец.
-      match /{sub=**} {
-        allow read, write: if isOwner(uid);
       }
     }
   }
