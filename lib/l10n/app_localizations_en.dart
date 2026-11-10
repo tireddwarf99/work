@@ -19,9 +19,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get newNote => 'New note';
 
   @override
-  String get newTask => 'Add task';
-
-  @override
   String get search => 'Search';
 
   @override
@@ -85,9 +82,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noFolder => 'No folder';
 
   @override
-  String get noList => 'No list';
-
-  @override
   String get addTask => 'Add task';
 
   @override
@@ -111,19 +105,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get priorityLabel => 'Priority';
 
   @override
-  String get remindersLabel => 'Reminders';
-
-  @override
-  String get repeatLabel => 'Repeat';
-
-  @override
   String get tagsLabel => 'Tags';
 
   @override
   String get subtasksLabel => 'Subtasks';
-
-  @override
-  String get noRepeat => 'Do not repeat';
 
   @override
   String get priorityHigh => 'High';
@@ -185,17 +170,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Move this folder with all its contents to trash?';
 
   @override
-  String get deleteTagConfirm =>
-      'Delete tag? Labels are removed, entries stay.';
-
-  @override
   String get trashEmpty => 'Trash is empty';
 
   @override
   String get searchHint => 'Search notes and tasks';
-
-  @override
-  String get searchResults => 'Results';
 
   @override
   String get noResults => 'Nothing found';
@@ -230,16 +208,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Cloud is not connected — everything is stored locally (stage 3).';
 
   @override
-  String get notificationsSection => 'Notifications';
-
-  @override
-  String get notificationsLocalDevice =>
-      'Notification settings apply to this device (stage 5).';
-
-  @override
-  String get windowsOpenApp => 'Open';
-
-  @override
   String get pinned => 'Pinned';
 
   @override
@@ -257,21 +225,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get standaloneList => 'standalone';
-
-  @override
-  String notesSuffix(int n) {
-    return '$n notes';
-  }
-
-  @override
   String get emptyNotes => 'No notes';
 
   @override
   String get emptyNotesHint => 'Create your first note';
-
-  @override
-  String get dataLayerReady => 'Data layer ready';
 
   @override
   String get signIn => 'Sign in with Google';
@@ -355,4 +312,129 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get debugAcceptSnapshotWarning =>
       'The server switched to a newer data snapshot. Accepting will discard unsynced local changes. Accept the new snapshot?';
+
+  @override
+  String get newFolder => 'New folder';
+
+  @override
+  String get folderNameHint => 'Folder name';
+
+  @override
+  String get rename => 'Rename';
+
+  @override
+  String get newList => 'New list';
+
+  @override
+  String get listTitleHint => 'List title';
+
+  @override
+  String get deleteListConfirm => 'Move the list and its tasks to the trash?';
+
+  @override
+  String get taskTextHint => 'What needs to be done?';
+
+  @override
+  String get subtaskHint => 'Subtask name';
+
+  @override
+  String get noteTitleHint => 'Note title';
+
+  @override
+  String get noteBodyHint => 'Start writing…';
+
+  @override
+  String get tagNameHint => 'New tag name';
+
+  @override
+  String get saveFailed =>
+      'Couldn\'t save the note. Your changes are still in the editor.';
+
+  @override
+  String get emptyListHint => 'No tasks in this list yet';
+
+  @override
+  String get openList => 'Open list';
+
+  @override
+  String get close => 'Close';
+
+  @override
+  String get settingsTooltip => 'Settings';
+
+  @override
+  String get changeDate => 'Change date';
+
+  @override
+  String get setTime => 'Set time';
+
+  @override
+  String get removeTime => 'Remove time';
+
+  @override
+  String get clearDue => 'Clear due date';
+
+  @override
+  String get syncing => 'Syncing…';
+
+  @override
+  String pendingChangesN(int n) {
+    return 'Pending changes: $n';
+  }
+
+  @override
+  String get epochSwitchPending =>
+      'A decision on the new snapshot is required (Diagnostics)';
+
+  @override
+  String get signInFailed => 'Sign-in failed';
+
+  @override
+  String get errorDetails => 'Details';
+
+  @override
+  String get actionFailed => 'The action failed';
+
+  @override
+  String get dropForbidden => 'This move isn\'t possible';
+
+  @override
+  String get restored => 'Restored';
+
+  @override
+  String get folder => 'Folder';
+
+  @override
+  String get yes => 'yes';
+
+  @override
+  String get no => 'no';
+
+  @override
+  String debugSession(String value) {
+    return 'Session: $value';
+  }
+
+  @override
+  String debugSync(String running, String last, int pending) {
+    return 'Sync: $running · last: $last · queued: $pending';
+  }
+
+  @override
+  String get debugIdle => 'idle';
+
+  @override
+  String debugError(String error, String denied, String mismatch) {
+    return 'Error: $error (permission denied: $denied, other account: $mismatch)';
+  }
+
+  @override
+  String debugCounters(int outbox, int conflicts) {
+    return 'Queued: $outbox · conflicts: $conflicts';
+  }
+
+  @override
+  String conflictEntity(String type, String id) {
+    return '$type · $id';
+  }
 }

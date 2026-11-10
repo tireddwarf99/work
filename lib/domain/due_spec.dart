@@ -44,17 +44,14 @@ class DueSpec {
   final String? date;
   final int? minutes;
 
-  const DueSpec.none()
-      : kind = DueKind.none,
-        date = null,
-        minutes = null;
+  const DueSpec.none() : kind = DueKind.none, date = null, minutes = null;
 
   const DueSpec.dateOnly(String this.date)
-      : kind = DueKind.date,
-        minutes = null;
+    : kind = DueKind.date,
+      minutes = null;
 
   const DueSpec.at(String this.date, int this.minutes)
-      : kind = DueKind.dateTime;
+    : kind = DueKind.dateTime;
 
   bool get isNone => kind == DueKind.none;
   bool get hasTime => kind == DueKind.dateTime;
@@ -71,8 +68,8 @@ class DueSpec {
 
   @override
   String toString() => switch (kind) {
-        DueKind.none => 'none',
-        DueKind.date => 'date($date)',
-        DueKind.dateTime => 'dateTime($date, $minutes)',
-      };
+    DueKind.none => 'none',
+    DueKind.date => 'date($date)',
+    DueKind.dateTime => 'dateTime($date, $minutes)',
+  };
 }
