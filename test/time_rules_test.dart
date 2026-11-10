@@ -171,4 +171,24 @@ void main() {
       expect(shiftDueByCalendarDays(const DueSpec.none(), 5), const DueSpec.none());
     });
   });
+
+  group('календарная арифметика дат', () {
+    test('сдвиг назад и через границу года', () {
+      expect(shiftYmd('2026-01-01', -1), '2025-12-31');
+      expect(shiftYmd('2026-12-31', 1), '2027-01-01');
+      expect(shiftYmd('2026-03-29', 0), '2026-03-29');
+    });
+
+    test('разность дат не зависит от DST-границ и знака', () {
+      expect(calendarDayDiff('2026-03-28', '2026-03-30'), 2);
+      expect(calendarDayDiff('2026-10-24', '2026-10-26'), 2);
+      expect(calendarDayDiff('2026-11-02', '2026-11-01'), -1);
+    });
+
+    test('localNow переносит поля локальных часов', () {
+      final now = localNow(clock: DateTime(2026, 11, 2, 23, 59, 30));
+      expect(ymdOf(now), '2026-11-02');
+      expect((now.hour, now.minute, now.second), (23, 59, 30));
+    });
+  });
 }
