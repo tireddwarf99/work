@@ -35,7 +35,6 @@ class TasksService {
               'parent belongs to another list (§3)');
         }
       }
-      final order = await _nextSiblingOrder(listId, parentId);
       final id = _uuid.v4();
       await _db.into(_db.tasks).insert(TasksCompanion.insert(
             id: id,
@@ -47,12 +46,11 @@ class TasksService {
             dueKind: Value(due.kind),
             dueDate: Value(due.date),
             dueMinutes: Value(due.minutes),
-            manualOrder: Value(order),
+            manualOrder: Value(await _nextSiblingOrder(listId, parentId)),
             modifiedAt: Value(DateTime.now().toUtc()),
           ));
-      final created = await _get(id);
-      await _ledger.recordUpsert(SyncEntityType.task, id, created.toJson());
-      return created;
+      await _ledger.recordSnapshot(SyncEntityType.task, id);
+      return _get(id);
     });
   }
 
@@ -116,6 +114,8 @@ class TasksService {
       if (newParentId == id) {
         throw ArgumentError('cannot attach task to itself');
       }
+      await _ensureListExists(newListId);
+      final task = await _get(id);
       if (newParentId != null) {
         final parent = await _get(newParentId);
         if (parent.listId != newListId) {
@@ -126,22 +126,22 @@ class TasksService {
           throw StateError('cannot move task inside its own subtree (§4)');
         }
       }
-      final now = DateTime.now().toUtc();
       // Переносим ветку целиком: идентификаторы, структура, сроки и
-      // напоминания сохраняются; источник обновляется (§4).
+      // напоминания сохраняются; источник обновляется (§4). Корень встаёт
+      // последним среди соседей нового родителя.
       final subIds = await _subtreeIds(id);
-      await (_db.update(_db.tasks)..where((t) => t.id.isIn(subIds))).write(
-        TasksCompanion(listId: Value(newListId), modifiedAt: Value(now)),
-      );
-      await (_db.update(_db.tasks)..where((t) => t.id.equals(id))).write(
-        TasksCompanion(
-          parentId: Value(newParentId),
-          modifiedAt: Value(now),
-        ),
-      );
+      await (_db.update(_db.tasks)..where((t) => t.id.isIn(subIds)))
+          .write(TasksCompanion(listId: Value(newListId)));
+      if (task.listId != newListId || task.parentId != newParentId) {
+        await (_db.update(_db.tasks)..where((t) => t.id.equals(id))).write(
+          TasksCompanion(
+            parentId: Value(newParentId),
+            manualOrder: Value(await _nextSiblingOrder(newListId, newParentId)),
+          ),
+        );
+      }
       for (final tid in subIds) {
-        await _ledger.recordUpsert(
-            SyncEntityType.task, tid, (await _get(tid)).toJson());
+        await _ledger.recordChange(SyncEntityType.task, tid);
       }
     });
   }
@@ -160,21 +160,24 @@ class TasksService {
         throw ArgumentError.value(afterId, 'afterId', 'not a sibling');
       }
       siblings.insert(anchorIndex + 1, task);
-      await _renumber(siblings);
-      await _ledger.recordUpsert(
-          SyncEntityType.task, id, (await _get(id)).toJson());
+      for (var i = 0; i < siblings.length; i++) {
+        final current = siblings[i];
+        if (current.id != id && current.manualOrder == i + 1) continue;
+        await (_db.update(_db.tasks)..where((t) => t.id.equals(current.id)))
+            .write(TasksCompanion(manualOrder: Value(i + 1)));
+        await _ledger.recordChange(SyncEntityType.task, current.id);
+      }
     });
   }
 
   /// Корзина: вся ветка целиком, восстановление целиком (§11).
   Future<void> moveBranchToTrash(String id) {
     return _db.transaction(() async {
-      final now = DateTime.now().toUtc();
       final subIds = await _subtreeIds(id);
       await (_db.update(_db.tasks)..where((t) => t.id.isIn(subIds)))
-          .write(TasksCompanion(deletedAt: Value(now), modifiedAt: Value(now)));
+          .write(TasksCompanion(deletedAt: Value(DateTime.now().toUtc())));
       for (final tid in subIds) {
-        await _ledger.recordDeletion(SyncEntityType.task, tid);
+        await _ledger.recordTrashed(SyncEntityType.task, tid);
       }
     });
   }
@@ -184,52 +187,31 @@ class TasksService {
     return _db.transaction(() async {
       final subIds = await _subtreeIds(id);
       await (_db.update(_db.tasks)..where((t) => t.id.isIn(subIds)))
-          .write(TasksCompanion(deletedAt: Value(null), modifiedAt: Value(DateTime.now().toUtc())));
+          .write(TasksCompanion(deletedAt: Value(null)));
       for (final tid in subIds) {
-        await _ledger.recordUpsert(
-            SyncEntityType.task, tid, (await _get(tid)).toJson());
+        await _ledger.recordChange(SyncEntityType.task, tid);
       }
     });
   }
 
   Future<Task> get(String id) => _get(id);
+
   /// Все активные задачи списка в ручном порядке (для embed-карточки).
   Stream<List<Task>> watchActiveInList(String listId) =>
-      (_db.select(_db.tasks)
-            ..where((t) => t.listId.equals(listId) & t.deletedAt.isNull())
-            ..orderBy([(t) => OrderingTerm.asc(t.manualOrder)]))
-          .watch();
-
-  /// Выполненные корневые задачи списка (область «Виконані», §4).
-  Stream<List<Task>> watchCompletedRoots(String listId) =>
-      (_db.select(_db.tasks)
-            ..where((t) =>
-                t.listId.equals(listId) &
-                t.deletedAt.isNull() &
-                t.parentId.isNull() &
-                t.completedAt.isNotNull())
-            ..orderBy([(t) => OrderingTerm.desc(t.completedAt)]))
-          .watch();
-
+      _activeInList(listId).watch();
 
   /// Активные (не в корзине) задачи списка в ручном порядке.
   Future<List<Task>> listActiveInList(String listId) =>
-      (_db.select(_db.tasks)
-            ..where((t) => t.listId.equals(listId) & t.deletedAt.isNull())
-            ..orderBy([(t) => OrderingTerm.asc(t.manualOrder)]))
-          .get();
+      _activeInList(listId).get();
+
+  /// Выполненные корневые задачи списка (область «Виконані», §4).
+  Stream<List<Task>> watchCompletedRoots(String listId) =>
+      _completedRoots(listId).watch();
 
   /// Выполненные корневые задачи списка — для сворачиваемой области
   /// «Виконані» (§4); выполняют запрос, группировка на UI.
   Future<List<Task>> listCompletedRoots(String listId) =>
-      (_db.select(_db.tasks)
-            ..where((t) =>
-                t.listId.equals(listId) &
-                t.deletedAt.isNull() &
-                t.parentId.isNull() &
-                t.completedAt.isNotNull())
-            ..orderBy([(t) => OrderingTerm.desc(t.completedAt)]))
-          .get();
+      _completedRoots(listId).get();
 
   Future<List<Task>> children(String parentId) =>
       (_db.select(_db.tasks)
@@ -239,17 +221,26 @@ class TasksService {
 
   // --- внутренние ---
 
+  SimpleSelectStatement<$TasksTable, Task> _activeInList(String listId) =>
+      _db.select(_db.tasks)
+        ..where((t) => t.listId.equals(listId) & t.deletedAt.isNull())
+        ..orderBy([(t) => OrderingTerm.asc(t.manualOrder)]);
+
+  SimpleSelectStatement<$TasksTable, Task> _completedRoots(String listId) =>
+      _db.select(_db.tasks)
+        ..where((t) =>
+            t.listId.equals(listId) &
+            t.deletedAt.isNull() &
+            t.parentId.isNull() &
+            t.completedAt.isNotNull())
+        ..orderBy([(t) => OrderingTerm.desc(t.completedAt)]);
+
   Future<void> _mutate(
       String id, TasksCompanion Function(Task current) build) {
     return _db.transaction(() async {
-      final current = await _get(id);
-      await (_db.update(_db.tasks)..where((t) => t.id.equals(id))).write(
-        build(current).copyWith(modifiedAt: Value(DateTime.now().toUtc())),
-      );
-      await _db.customStatement(
-          'UPDATE tasks SET revision = revision + 1 WHERE id = ?', [id]);
-      await _ledger.recordUpsert(
-          SyncEntityType.task, id, (await _get(id)).toJson());
+      await (_db.update(_db.tasks)..where((t) => t.id.equals(id)))
+          .write(build(await _get(id)));
+      await _ledger.recordChange(SyncEntityType.task, id);
     });
   }
 
@@ -284,13 +275,6 @@ class TasksService {
                     : t.parentId.equals(parentId)))
             ..orderBy([(t) => OrderingTerm.asc(t.manualOrder)]))
           .get();
-
-  Future<void> _renumber(List<Task> siblings) async {
-    for (var i = 0; i < siblings.length; i++) {
-      await (_db.update(_db.tasks)..where((t) => t.id.equals(siblings[i].id)))
-          .write(TasksCompanion(manualOrder: Value(i + 1)));
-    }
-  }
 
   Future<bool> _isDescendant(String candidateId, String ancestorId) async {
     var current = candidateId;
