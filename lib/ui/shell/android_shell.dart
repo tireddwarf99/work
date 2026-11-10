@@ -10,6 +10,7 @@ import '../../l10n/app_localizations.dart';
 import '../providers.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../lists/lists_screen.dart';
+import '../notes/folder_actions.dart';
 import '../notes/notes_pane.dart';
 import '../settings_screen.dart';
 
@@ -33,6 +34,7 @@ class AndroidShell extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),
+            tooltip: l10n.settingsTooltip,
             onPressed: () => context.push('/settings'),
           ),
         ],
@@ -79,16 +81,34 @@ class AndroidDashboardTab extends ConsumerWidget {
 }
 
 /// Ветка «Заметки»: перечень + создание.
-class AndroidNotesTab extends ConsumerWidget {
+class AndroidNotesTab extends StatefulWidget {
   const AndroidNotesTab({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return NotesPane(
-      folderId: null,
-      selectedNoteId: null,
-      onNoteSelected: (noteId) => context.push('/note/$noteId'),
-      trailingFab: true,
+  State<AndroidNotesTab> createState() => _AndroidNotesTabState();
+}
+
+class _AndroidNotesTabState extends State<AndroidNotesTab> {
+  /// null — «Без папки».
+  String? _folderId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        FolderBar(
+          selectedFolderId: _folderId,
+          onSelected: (id) => setState(() => _folderId = id),
+        ),
+        Expanded(
+          child: NotesPane(
+            folderId: _folderId,
+            selectedNoteId: null,
+            onNoteSelected: (noteId) => context.push('/note/$noteId'),
+            trailingFab: true,
+          ),
+        ),
+      ],
     );
   }
 }
