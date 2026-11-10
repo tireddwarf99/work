@@ -264,7 +264,7 @@ void main() {
       await notes.create(folderId: child.id, title: 'N');
 
       await folders.moveToTrash(child.id);
-      final active = await folders.watchAllOnce();
+      final active = await folders.listAll();
       expect(active.map((f) => f.id), [root.id]);
     });
   });
