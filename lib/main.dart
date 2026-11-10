@@ -3,11 +3,14 @@
 /// «системная украинская → украинский, остальные → английский» (§8).
 library;
 
+import 'dart:developer' as developer;
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_quill/flutter_quill.dart' show FlutterQuillLocalizations;
+import 'package:flutter_quill/flutter_quill.dart'
+    show FlutterQuillLocalizations;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -23,10 +26,29 @@ import 'ui/shell/android_shell.dart';
 import 'ui/shell/windows_shell.dart';
 import 'ui/task_details/task_details.dart';
 
-final GlobalKey<NavigatorState> rootNavigatorKey =
-    GlobalKey<NavigatorState>();
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    developer.log(
+      'Flutter error',
+      name: 'app',
+      error: details.exception,
+      stackTrace: details.stack,
+    );
+  };
+  // Необработанные асинхронные ошибки вне дерева виджетов.
+  PlatformDispatcher.instance.onError = (error, stack) {
+    developer.log(
+      'Uncaught error',
+      name: 'app',
+      error: error,
+      stackTrace: stack,
+    );
+    return true;
+  };
   runApp(const ProviderScope(child: NotesApp()));
 }
 
@@ -38,9 +60,21 @@ class NotesApp extends ConsumerStatefulWidget {
 }
 
 class _NotesAppState extends ConsumerState<NotesApp> {
+  /// Роутер создаётся один раз: пересоздание в build() сбрасывало бы
+  /// навигацию при каждой смене темы или языка.
+  late final GoRouter _router = _buildRouter();
+
   @override
   void initState() {
     super.initState();
+    // Корзина (§11): записи старше 30 дней удаляются при запуске.
+    ref.read(trashServiceProvider).purgeExpired().catchError((
+      Object e,
+      StackTrace s,
+    ) {
+      developer.log('Trash purge failed', name: 'app', error: e, stackTrace: s);
+      return 0;
+    });
     // Android «Поделиться» (§8): текст/URL → заметка либо задача во
     // «Входящих».
     registerShareHandler((text) {
@@ -66,11 +100,11 @@ class _NotesAppState extends ConsumerState<NotesApp> {
     final manualLocale = ref.watch(localeProvider);
 
     return MaterialApp.router(
-      title: 'Notes',
+      onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
       theme: buildLightTheme(),
       darkTheme: buildDarkTheme(),
       themeMode: themeMode,
-      routerConfig: _buildRouter(),
+      routerConfig: _router,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         FlutterQuillLocalizations.delegate,
@@ -102,33 +136,36 @@ class _NotesAppState extends ConsumerState<NotesApp> {
       initialLocation: '/',
       routes: [
         if (isDesktop)
-          GoRoute(
-            path: '/',
-            builder: (context, state) => const WindowsShell(),
-          )
+          GoRoute(path: '/', builder: (context, state) => const WindowsShell())
         else ...[
           StatefulShellRoute.indexedStack(
             builder: (context, state, shell) =>
                 AndroidShell(navigationShell: shell),
             branches: [
-              StatefulShellBranch(routes: [
-                GoRoute(
-                  path: '/',
-                  builder: (context, state) => const AndroidDashboardTab(),
-                ),
-              ]),
-              StatefulShellBranch(routes: [
-                GoRoute(
-                  path: '/notes',
-                  builder: (context, state) => const AndroidNotesTab(),
-                ),
-              ]),
-              StatefulShellBranch(routes: [
-                GoRoute(
-                  path: '/lists',
-                  builder: (context, state) => const AndroidListsTab(),
-                ),
-              ]),
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
+                    path: '/',
+                    builder: (context, state) => const AndroidDashboardTab(),
+                  ),
+                ],
+              ),
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
+                    path: '/notes',
+                    builder: (context, state) => const AndroidNotesTab(),
+                  ),
+                ],
+              ),
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
+                    path: '/lists',
+                    builder: (context, state) => const AndroidListsTab(),
+                  ),
+                ],
+              ),
             ],
           ),
           GoRoute(
@@ -150,9 +187,8 @@ class _NotesAppState extends ConsumerState<NotesApp> {
           ),
           GoRoute(
             path: '/task/:id',
-            builder: (context, state) => TaskDetails(
-              taskId: state.pathParameters['id']!,
-            ),
+            builder: (context, state) =>
+                TaskDetails(taskId: state.pathParameters['id']!),
           ),
           GoRoute(
             path: '/settings',
