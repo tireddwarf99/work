@@ -18,96 +18,98 @@ class FoldersService {
 
   Future<Folder> create(String name, {String? parentId}) {
     return _db.transaction(() async {
-      final order = await _nextOrder(parentId);
+      if (parentId != null) await _requireExists(parentId, 'parentId');
       final id = _uuid.v4();
-      final now = DateTime.now().toUtc();
-      final row = FoldersCompanion.insert(
-        id: id,
-        name: name,
-        parentId: Value(parentId),
-        manualOrder: Value(order),
-        modifiedAt: Value(now),
-      );
-      await _db.into(_db.folders).insert(row);
-      final created = await _get(id);
-      await _ledger.recordUpsert(SyncEntityType.folder, id, created.toJson());
-      return created;
+      await _db.into(_db.folders).insert(FoldersCompanion.insert(
+            id: id,
+            name: name,
+            parentId: Value(parentId),
+            manualOrder: Value(await _nextOrder(parentId)),
+            modifiedAt: Value(DateTime.now().toUtc()),
+          ));
+      await _ledger.recordSnapshot(SyncEntityType.folder, id);
+      return _get(id);
     });
   }
 
   Future<void> rename(String id, String name) {
     return _db.transaction(() async {
-      await (_db.update(_db.folders)..where((f) => f.id.equals(id))).write(
-        FoldersCompanion(name: Value(name), modifiedAt: Value(DateTime.now().toUtc())),
-      );
-      await _ledger.recordUpsert(SyncEntityType.folder, id,
-          (await _get(id)).toJson());
+      await (_db.update(_db.folders)..where((f) => f.id.equals(id)))
+          .write(FoldersCompanion(name: Value(name)));
+      await _ledger.recordChange(SyncEntityType.folder, id);
     });
   }
 
-  /// Перемещение папки; цикл «папка внутри себя» запрещён (§4).
+  /// Перемещение папки; цикл «папка внутри себя» запрещён (§4). Папка встаёт
+  /// последней среди соседей нового родителя.
   Future<void> move(String id, String? newParentId) {
     return _db.transaction(() async {
+      await _requireExists(id, 'id');
       if (newParentId != null) {
-        if (newParentId == id ||
-            await _isDescendant(newParentId, id)) {
+        await _requireExists(newParentId, 'newParentId');
+        if (newParentId == id || await _isDescendant(newParentId, id)) {
           throw StateError('cannot move folder inside itself');
         }
       }
       await (_db.update(_db.folders)..where((f) => f.id.equals(id))).write(
         FoldersCompanion(
-            parentId: Value(newParentId),
-            modifiedAt: Value(DateTime.now().toUtc())),
+          parentId: Value(newParentId),
+          manualOrder: Value(await _nextOrder(newParentId)),
+        ),
       );
-      await _ledger.recordUpsert(
-          SyncEntityType.folder, id, (await _get(id)).toJson());
+      await _ledger.recordChange(SyncEntityType.folder, id);
     });
   }
 
   /// Корзина: мягкое удаление всего дерева (§11) — подтверждение на UI.
+  /// Заметки остаются в своих папках: при восстановлении дерева они на месте,
+  /// после окончательного удаления папки уходят в «Без папки» (TrashService).
   Future<void> moveToTrash(String id) {
     return _db.transaction(() async {
-      final now = DateTime.now().toUtc();
       final ids = await _subtreeIds(id);
       await (_db.update(_db.folders)..where((f) => f.id.isIn(ids)))
-          .write(FoldersCompanion(deletedAt: Value(now), modifiedAt: Value(now)));
+          .write(FoldersCompanion(deletedAt: Value(DateTime.now().toUtc())));
       for (final fid in ids) {
-        await _ledger.recordDeletion(SyncEntityType.folder, fid);
+        await _ledger.recordTrashed(SyncEntityType.folder, fid);
       }
     });
   }
 
   Future<Folder> get(String id) => _get(id);
 
-  Future<List<Folder>> watchAllOnce({bool includeTrashed = false}) =>
-      (_db.select(_db.folders)
-            ..where((f) =>
-                includeTrashed ? const Constant(true) : f.deletedAt.isNull())
-            ..orderBy([(f) => OrderingTerm.asc(f.manualOrder)]))
-          .get();
+  /// Перечень папок одним запросом.
+  Future<List<Folder>> listAll({bool includeTrashed = false}) =>
+      _all(includeTrashed).get();
 
   /// Реактивный перечень папок для навигации (§4).
   Stream<List<Folder>> watchAll({bool includeTrashed = false}) =>
-      (_db.select(_db.folders)
-            ..where((f) =>
-                includeTrashed ? const Constant(true) : f.deletedAt.isNull())
-            ..orderBy([(f) => OrderingTerm.asc(f.manualOrder)]))
-          .watch();
+      _all(includeTrashed).watch();
 
   Future<bool> isDescendantOf(String candidateId, String ancestorId) =>
       _isDescendant(candidateId, ancestorId);
 
   // --- внутренние ---
 
+  SimpleSelectStatement<$FoldersTable, Folder> _all(bool includeTrashed) =>
+      _db.select(_db.folders)
+        ..where((f) =>
+            includeTrashed ? const Constant(true) : f.deletedAt.isNull())
+        ..orderBy([(f) => OrderingTerm.asc(f.manualOrder)]);
+
+  Future<void> _requireExists(String id, String name) async {
+    final found = await (_db.select(_db.folders)
+          ..where((f) => f.id.equals(id)))
+        .getSingleOrNull();
+    if (found == null) {
+      throw ArgumentError.value(id, name, 'folder does not exist');
+    }
+  }
+
   Future<int> _nextOrder(String? parentId) async {
     final maxExp = _db.folders.manualOrder.max();
     final query = _db.selectOnly(_db.folders)
-      ..addColumns([maxExp]);
-    if (parentId == null) {
-      query.where(_db.folders.parentId.isNull());
-    } else {
-      query.where(_db.folders.parentId.equals(parentId));
-    }
+      ..addColumns([maxExp])
+      ..where(_db.folders.parentId.equalsNullable(parentId));
     final row = await query.getSingle();
     return (row.read(maxExp) ?? 0) + 1;
   }
