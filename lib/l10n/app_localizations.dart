@@ -116,12 +116,6 @@ abstract class AppLocalizations {
   /// **'Нова нотатка'**
   String get newNote;
 
-  /// No description provided for @newTask.
-  ///
-  /// In uk, this message translates to:
-  /// **'Додати завдання'**
-  String get newTask;
-
   /// No description provided for @search.
   ///
   /// In uk, this message translates to:
@@ -248,12 +242,6 @@ abstract class AppLocalizations {
   /// **'Без папки'**
   String get noFolder;
 
-  /// No description provided for @noList.
-  ///
-  /// In uk, this message translates to:
-  /// **'Без списку'**
-  String get noList;
-
   /// No description provided for @addTask.
   ///
   /// In uk, this message translates to:
@@ -296,18 +284,6 @@ abstract class AppLocalizations {
   /// **'Пріоритет'**
   String get priorityLabel;
 
-  /// No description provided for @remindersLabel.
-  ///
-  /// In uk, this message translates to:
-  /// **'Нагадування'**
-  String get remindersLabel;
-
-  /// No description provided for @repeatLabel.
-  ///
-  /// In uk, this message translates to:
-  /// **'Повторення'**
-  String get repeatLabel;
-
   /// No description provided for @tagsLabel.
   ///
   /// In uk, this message translates to:
@@ -319,12 +295,6 @@ abstract class AppLocalizations {
   /// In uk, this message translates to:
   /// **'Підзавдання'**
   String get subtasksLabel;
-
-  /// No description provided for @noRepeat.
-  ///
-  /// In uk, this message translates to:
-  /// **'Не повторювати'**
-  String get noRepeat;
 
   /// No description provided for @priorityHigh.
   ///
@@ -440,12 +410,6 @@ abstract class AppLocalizations {
   /// **'Видалити папку з усім вмістом у кошик?'**
   String get deleteFolderConfirm;
 
-  /// No description provided for @deleteTagConfirm.
-  ///
-  /// In uk, this message translates to:
-  /// **'Видалити тег? Мітки буде знято, записи залишаться.'**
-  String get deleteTagConfirm;
-
   /// No description provided for @trashEmpty.
   ///
   /// In uk, this message translates to:
@@ -457,12 +421,6 @@ abstract class AppLocalizations {
   /// In uk, this message translates to:
   /// **'Пошук нотаток і завдань'**
   String get searchHint;
-
-  /// No description provided for @searchResults.
-  ///
-  /// In uk, this message translates to:
-  /// **'Результати'**
-  String get searchResults;
 
   /// No description provided for @noResults.
   ///
@@ -524,24 +482,6 @@ abstract class AppLocalizations {
   /// **'Хмара не підключена — усе зберігається локально (етап 3).'**
   String get accountLocalOnly;
 
-  /// No description provided for @notificationsSection.
-  ///
-  /// In uk, this message translates to:
-  /// **'Нотифікації'**
-  String get notificationsSection;
-
-  /// No description provided for @notificationsLocalDevice.
-  ///
-  /// In uk, this message translates to:
-  /// **'Налаштування нотифікацій діють на цьому пристрої (етап 5).'**
-  String get notificationsLocalDevice;
-
-  /// No description provided for @windowsOpenApp.
-  ///
-  /// In uk, this message translates to:
-  /// **'Відкрити'**
-  String get windowsOpenApp;
-
   /// No description provided for @pinned.
   ///
   /// In uk, this message translates to:
@@ -572,18 +512,6 @@ abstract class AppLocalizations {
   /// **'вбудований · {source}'**
   String embeddedFrom(String source);
 
-  /// No description provided for @standaloneList.
-  ///
-  /// In uk, this message translates to:
-  /// **'самостійний'**
-  String get standaloneList;
-
-  /// No description provided for @notesSuffix.
-  ///
-  /// In uk, this message translates to:
-  /// **'{n} нотаток'**
-  String notesSuffix(int n);
-
   /// No description provided for @emptyNotes.
   ///
   /// In uk, this message translates to:
@@ -595,12 +523,6 @@ abstract class AppLocalizations {
   /// In uk, this message translates to:
   /// **'Створіть першу нотатку'**
   String get emptyNotesHint;
-
-  /// No description provided for @dataLayerReady.
-  ///
-  /// In uk, this message translates to:
-  /// **'Слой даних готовий'**
-  String get dataLayerReady;
 
   /// No description provided for @signIn.
   ///
@@ -757,6 +679,228 @@ abstract class AppLocalizations {
   /// In uk, this message translates to:
   /// **'Сервер перейшов на новий знімок даних. Прийняття затре несинхронізовані локальні зміни. Прийняти новий знімок?'**
   String get debugAcceptSnapshotWarning;
+
+  /// No description provided for @newFolder.
+  ///
+  /// In uk, this message translates to:
+  /// **'Нова папка'**
+  String get newFolder;
+
+  /// No description provided for @folderNameHint.
+  ///
+  /// In uk, this message translates to:
+  /// **'Назва папки'**
+  String get folderNameHint;
+
+  /// No description provided for @rename.
+  ///
+  /// In uk, this message translates to:
+  /// **'Перейменувати'**
+  String get rename;
+
+  /// No description provided for @newList.
+  ///
+  /// In uk, this message translates to:
+  /// **'Новий список'**
+  String get newList;
+
+  /// No description provided for @listTitleHint.
+  ///
+  /// In uk, this message translates to:
+  /// **'Назва списку'**
+  String get listTitleHint;
+
+  /// No description provided for @deleteListConfirm.
+  ///
+  /// In uk, this message translates to:
+  /// **'Видалити список із завданнями у кошик?'**
+  String get deleteListConfirm;
+
+  /// No description provided for @taskTextHint.
+  ///
+  /// In uk, this message translates to:
+  /// **'Що потрібно зробити?'**
+  String get taskTextHint;
+
+  /// No description provided for @subtaskHint.
+  ///
+  /// In uk, this message translates to:
+  /// **'Назва підзавдання'**
+  String get subtaskHint;
+
+  /// No description provided for @noteTitleHint.
+  ///
+  /// In uk, this message translates to:
+  /// **'Назва нотатки'**
+  String get noteTitleHint;
+
+  /// No description provided for @noteBodyHint.
+  ///
+  /// In uk, this message translates to:
+  /// **'Почніть писати…'**
+  String get noteBodyHint;
+
+  /// No description provided for @tagNameHint.
+  ///
+  /// In uk, this message translates to:
+  /// **'Назва нового тега'**
+  String get tagNameHint;
+
+  /// No description provided for @saveFailed.
+  ///
+  /// In uk, this message translates to:
+  /// **'Не вдалося зберегти нотатку. Зміни залишаються в редакторі.'**
+  String get saveFailed;
+
+  /// No description provided for @emptyListHint.
+  ///
+  /// In uk, this message translates to:
+  /// **'У списку ще немає завдань'**
+  String get emptyListHint;
+
+  /// No description provided for @openList.
+  ///
+  /// In uk, this message translates to:
+  /// **'Відкрити список'**
+  String get openList;
+
+  /// No description provided for @close.
+  ///
+  /// In uk, this message translates to:
+  /// **'Закрити'**
+  String get close;
+
+  /// No description provided for @settingsTooltip.
+  ///
+  /// In uk, this message translates to:
+  /// **'Налаштування'**
+  String get settingsTooltip;
+
+  /// No description provided for @changeDate.
+  ///
+  /// In uk, this message translates to:
+  /// **'Змінити дату'**
+  String get changeDate;
+
+  /// No description provided for @setTime.
+  ///
+  /// In uk, this message translates to:
+  /// **'Вказати час'**
+  String get setTime;
+
+  /// No description provided for @removeTime.
+  ///
+  /// In uk, this message translates to:
+  /// **'Прибрати час'**
+  String get removeTime;
+
+  /// No description provided for @clearDue.
+  ///
+  /// In uk, this message translates to:
+  /// **'Прибрати термін'**
+  String get clearDue;
+
+  /// No description provided for @syncing.
+  ///
+  /// In uk, this message translates to:
+  /// **'Синхронізація…'**
+  String get syncing;
+
+  /// No description provided for @pendingChangesN.
+  ///
+  /// In uk, this message translates to:
+  /// **'Очікують синхронізації: {n}'**
+  String pendingChangesN(int n);
+
+  /// No description provided for @epochSwitchPending.
+  ///
+  /// In uk, this message translates to:
+  /// **'Потрібне рішення щодо нового знімка (Діагностика)'**
+  String get epochSwitchPending;
+
+  /// No description provided for @signInFailed.
+  ///
+  /// In uk, this message translates to:
+  /// **'Не вдалося увійти'**
+  String get signInFailed;
+
+  /// No description provided for @errorDetails.
+  ///
+  /// In uk, this message translates to:
+  /// **'Деталі'**
+  String get errorDetails;
+
+  /// No description provided for @actionFailed.
+  ///
+  /// In uk, this message translates to:
+  /// **'Не вдалося виконати дію'**
+  String get actionFailed;
+
+  /// No description provided for @dropForbidden.
+  ///
+  /// In uk, this message translates to:
+  /// **'Таке переміщення неможливе'**
+  String get dropForbidden;
+
+  /// No description provided for @restored.
+  ///
+  /// In uk, this message translates to:
+  /// **'Відновлено'**
+  String get restored;
+
+  /// No description provided for @folder.
+  ///
+  /// In uk, this message translates to:
+  /// **'Папка'**
+  String get folder;
+
+  /// No description provided for @yes.
+  ///
+  /// In uk, this message translates to:
+  /// **'так'**
+  String get yes;
+
+  /// No description provided for @no.
+  ///
+  /// In uk, this message translates to:
+  /// **'ні'**
+  String get no;
+
+  /// No description provided for @debugSession.
+  ///
+  /// In uk, this message translates to:
+  /// **'Сесія: {value}'**
+  String debugSession(String value);
+
+  /// No description provided for @debugSync.
+  ///
+  /// In uk, this message translates to:
+  /// **'Синхронізація: {running} · остання: {last} · у черзі: {pending}'**
+  String debugSync(String running, String last, int pending);
+
+  /// No description provided for @debugIdle.
+  ///
+  /// In uk, this message translates to:
+  /// **'очікує'**
+  String get debugIdle;
+
+  /// No description provided for @debugError.
+  ///
+  /// In uk, this message translates to:
+  /// **'Помилка: {error} (доступ заборонено: {denied}, інший акаунт: {mismatch})'**
+  String debugError(String error, String denied, String mismatch);
+
+  /// No description provided for @debugCounters.
+  ///
+  /// In uk, this message translates to:
+  /// **'У черзі: {outbox} · конфлікти: {conflicts}'**
+  String debugCounters(int outbox, int conflicts);
+
+  /// No description provided for @conflictEntity.
+  ///
+  /// In uk, this message translates to:
+  /// **'{type} · {id}'**
+  String conflictEntity(String type, String id);
 }
 
 class _AppLocalizationsDelegate

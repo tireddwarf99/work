@@ -21,8 +21,7 @@ class PlatformDraggable<T extends Object> extends StatelessWidget {
     this.onDragStarted,
   });
 
-  static bool get _isMobile =>
-      Platform.isAndroid || Platform.isIOS;
+  static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
   @override
   Widget build(BuildContext context) {

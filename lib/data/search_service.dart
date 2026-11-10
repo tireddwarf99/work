@@ -11,10 +11,8 @@ import '../domain/due_spec.dart';
 class NoteSearchFilters {
   final String? folderId;
   final String? tagId;
-  final bool? completed;
 
-  /// Для заметок не применяется; оставлен для единообразия запросов.
-  const NoteSearchFilters({this.folderId, this.tagId, this.completed});
+  const NoteSearchFilters({this.folderId, this.tagId});
 }
 
 class TaskSearchFilters {
@@ -39,12 +37,15 @@ class SearchService {
   SearchService(this._db);
 
   /// Поиск заметок по названию и тексту (FTS5, unicode61).
-  Future<List<Note>> notes(String query, {NoteSearchFilters filters = const NoteSearchFilters()}) {
+  Future<List<Note>> notes(
+    String query, {
+    NoteSearchFilters filters = const NoteSearchFilters(),
+  }) {
     final match = _ftsMatch(query);
     if (match == null) return Future.value(const []);
     final buffer = StringBuffer(
       'SELECT n.* FROM notes_fts f '
-      'JOIN notes n ON n.rowid = f.rowid '
+      'JOIN notes n ON n.id = f.note_id '
       'WHERE notes_fts MATCH ? AND n.deleted_at IS NULL',
     );
     final variables = <Variable>[Variable(match)];
@@ -54,26 +55,35 @@ class SearchService {
     }
     if (filters.tagId != null) {
       buffer.write(
-          ' AND EXISTS (SELECT 1 FROM entity_tags et '
-          'WHERE et.entity_id = n.id AND et.tag_id = ? '
-          'AND et.entity_kind = 0)');
+        ' AND EXISTS (SELECT 1 FROM entity_tags et '
+        'WHERE et.entity_id = n.id AND et.tag_id = ? '
+        'AND et.entity_kind = 0)',
+      );
       variables.add(Variable(filters.tagId));
     }
     buffer.write(' ORDER BY rank LIMIT 200');
     return _db
-        .customSelect(buffer.toString(),
-            variables: variables, readsFrom: {_db.notes})
+        .customSelect(
+          buffer.toString(),
+          variables: variables,
+          readsFrom: {_db.notes},
+        )
         .get()
-        .then((rows) async => [for (final r in rows) await _db.notes.mapFromRow(r)]);
+        .then(
+          (rows) async => [for (final r in rows) await _db.notes.mapFromRow(r)],
+        );
   }
 
   /// Поиск задач по тексту и описанию + фильтры (§4).
-  Future<List<Task>> tasks(String query, {TaskSearchFilters filters = const TaskSearchFilters()}) {
+  Future<List<Task>> tasks(
+    String query, {
+    TaskSearchFilters filters = const TaskSearchFilters(),
+  }) {
     final match = _ftsMatch(query);
     if (match == null) return Future.value(const []);
     final buffer = StringBuffer(
       'SELECT t.* FROM tasks_fts f '
-      'JOIN tasks t ON t.rowid = f.rowid '
+      'JOIN tasks t ON t.id = f.task_id '
       'WHERE tasks_fts MATCH ? AND t.deleted_at IS NULL',
     );
     final variables = <Variable>[Variable(match)];
@@ -82,9 +92,11 @@ class SearchService {
       variables.add(Variable(filters.listId));
     }
     if (filters.completed != null) {
-      buffer.write(filters.completed!
-          ? ' AND t.completed_at IS NOT NULL'
-          : ' AND t.completed_at IS NULL');
+      buffer.write(
+        filters.completed!
+            ? ' AND t.completed_at IS NOT NULL'
+            : ' AND t.completed_at IS NULL',
+      );
     }
     if (filters.priority != null) {
       buffer.write(' AND t.priority = ?');
@@ -96,27 +108,34 @@ class SearchService {
     }
     if (filters.tagId != null) {
       buffer.write(
-          ' AND EXISTS (SELECT 1 FROM entity_tags et '
-          'WHERE et.entity_id = t.id AND et.tag_id = ? '
-          'AND et.entity_kind = 1)');
+        ' AND EXISTS (SELECT 1 FROM entity_tags et '
+        'WHERE et.entity_id = t.id AND et.tag_id = ? '
+        'AND et.entity_kind = 1)',
+      );
       variables.add(Variable(filters.tagId));
     }
     buffer.write(' ORDER BY rank LIMIT 200');
     return _db
-        .customSelect(buffer.toString(),
-            variables: variables, readsFrom: {_db.tasks})
+        .customSelect(
+          buffer.toString(),
+          variables: variables,
+          readsFrom: {_db.tasks},
+        )
         .get()
-        .then((rows) async => [for (final r in rows) await _db.tasks.mapFromRow(r)]);
+        .then(
+          (rows) async => [for (final r in rows) await _db.tasks.mapFromRow(r)],
+        );
   }
 
-  /// Подготовка пользовательского ввода к FTS5 MATCH: слова в кавычках,
-  /// спецсимволы FTS внутри слов удаляются. Пустой ввод — null (пустая выборка).
+  /// Подготовка пользовательского ввода к FTS5 MATCH: каждое слово — строка
+  /// в кавычках (операторы FTS нейтрализованы) с префиксным совпадением
+  /// `"слово"*` для поиска по мере набора. Пустой ввод — null (пустая выборка).
   String? _ftsMatch(String query) {
     final words = query
-        .trim()
         .split(RegExp(r'\s+'))
+        .map((w) => w.replaceAll('"', ''))
         .where((w) => w.isNotEmpty)
-        .map((w) => '"${w.replaceAll('"', '')}"')
+        .map((w) => '"$w"*')
         .toList();
     if (words.isEmpty) return null;
     return words.join(' ');

@@ -5,16 +5,16 @@
 /// критерием равенства.
 library;
 
+import 'package:timezone/timezone.dart' as tz;
+
 import 'due_spec.dart';
-import 'time_rules.dart';
 import 'task_sort_input.dart';
+import 'time_rules.dart';
 
 /// По сроку: сначала ближайшие, без срока внизу, затем приоритет и ручной
 /// порядок (§4).
 int compareByDue(TaskSortInput a, TaskSortInput b) {
-  final da = _dueKey(a.due);
-  final db = _dueKey(b.due);
-  final byDue = da.compareTo(db);
+  final byDue = _compareDue(a.due, b.due);
   if (byDue != 0) return byDue;
   final byPriority = b.priority.index.compareTo(a.priority.index);
   if (byPriority != 0) return byPriority;
@@ -25,18 +25,21 @@ int compareByDue(TaskSortInput a, TaskSortInput b) {
 int compareByPriority(TaskSortInput a, TaskSortInput b) {
   final byPriority = b.priority.index.compareTo(a.priority.index);
   if (byPriority != 0) return byPriority;
-  final byDue = _dueKey(a.due).compareTo(_dueKey(b.due));
+  final byDue = _compareDue(a.due, b.due);
   if (byDue != 0) return byDue;
   return a.manualOrder.compareTo(b.manualOrder);
 }
 
-/// Ключ срока: по границе просрочки (§5) — «сначала ближайшие».
-/// Для даты без времени граница — 00:00 следующего дня; для даты-времени —
-/// сам локальный момент. Без срока — в самом конце.
-int _dueKey(DueSpec due) {
-  if (due.isNone) return 0x7FFFFFFFFFFFFFFF;
-  final (y, m, d) = splitYmd(due.date!);
-  final dayIndex = int.parse(y) * 10000 + int.parse(m) * 100 + int.parse(d);
-  if (due.hasTime) return dayIndex * 100000 + due.minutes! + 1;
-  return (dayIndex + 1) * 100000 + 1;
+/// Сравнение сроков по границе просрочки (§5): для даты без времени — 00:00
+/// следующего дня, для даты-времени — сам момент. Сроки сравниваются как
+/// календарные поля в одной зоне, поэтому зона не влияет на порядок.
+/// Без срока — в самом конце.
+int _compareDue(DueSpec a, DueSpec b) {
+  final da = dueDeadline(a, tz.UTC);
+  final db = dueDeadline(b, tz.UTC);
+  if (da == null || db == null) {
+    if (da == db) return 0;
+    return da == null ? 1 : -1;
+  }
+  return da.compareTo(db);
 }

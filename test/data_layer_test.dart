@@ -15,7 +15,6 @@ import 'package:notes_app/data/tasks_service.dart';
 import 'package:notes_app/data/trash_service.dart';
 import 'package:notes_app/db/app_database.dart';
 import 'package:notes_app/domain/due_spec.dart';
-import 'package:notes_app/domain/task_sort.dart';
 
 void main() {
   late AppDatabase db;
@@ -188,12 +187,6 @@ void main() {
       await tasks.setCompleted(root.id, true);
       expect((await tasks.get(root.id)).completedAt, isNotNull);
     });
-
-    test('сортировочные компараторы по правилам §4 (см. task_sort_test.dart)',
-        () async {
-      expect(compareByDue, isNotNull);
-      expect(compareByPriority, isNotNull);
-    });
   });
 
   group('списки', () {
@@ -264,7 +257,7 @@ void main() {
       await notes.create(folderId: child.id, title: 'N');
 
       await folders.moveToTrash(child.id);
-      final active = await folders.watchAllOnce();
+      final active = await folders.listAll();
       expect(active.map((f) => f.id), [root.id]);
     });
   });
@@ -350,16 +343,33 @@ void main() {
       expect(await settings.getShared('list_sort_inbox'), '"due"');
     });
 
-    test('getString/setString — сырое значение без JSON-обёртки', () async {
+    test('getString/setString и getDevice/setDevice — один формат (JSON)',
+        () async {
       await settings.setString('sync.workspace_uid', 'uid-123');
       expect(await settings.getString('sync.workspace_uid'), 'uid-123');
       expect(await settings.getString('theme'), isNull);
 
-      // getString — сырой взгляд на то же хранилище: JSON-значения старых
-      // версий видны как есть; совместимость обеспечивает stripping кавычек
-      // в вызывающем коде.
-      await settings.setDevice('legacy', 'json');
-      expect(await settings.getString('legacy'), '"json"');
+      await settings.setDevice('theme', 'dark');
+      expect(await settings.getString('theme'), 'dark');
+      await settings.setString('locale', '');
+      expect(await settings.getString('locale'), '');
+      expect(await settings.getDevice('locale'), '""');
+    });
+
+    test('значение без JSON-обёртки (старый формат) читается как есть',
+        () async {
+      await db.customStatement(
+          "INSERT INTO device_settings (key, value) VALUES ('legacy', 'raw')");
+      expect(await settings.getString('legacy'), 'raw');
+    });
+
+    test('null удаляет настройку', () async {
+      await settings.setString('k', 'v');
+      await settings.setString('k', null);
+      expect(await settings.getString('k'), isNull);
+      await settings.setShared('s', 1);
+      await settings.setShared('s', null);
+      expect(await settings.getShared('s'), isNull);
     });
   });
 }

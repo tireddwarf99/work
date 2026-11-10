@@ -1,6 +1,7 @@
 /// Защищённое хранилище токенов (§9): Android — Keystore-backed
 /// EncryptedSharedPreferences (MethodChannel), Windows — DPAPI
-/// (CryptProtectData через FFI, файлы в приватной области данных).
+/// (CryptProtectData через FFI, файлы в приватной области данных). Это
+/// собственная реализация, flutter_secure_storage не используется.
 /// Токены не попадают в ZIP-экспорт и логи.
 library;
 
@@ -14,6 +15,8 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:win32/win32.dart';
+
+import '../diagnostics/diag_log.dart';
 
 /// Интерфейс защищённого хранилища «ключ → значение».
 abstract class SecureStore {
@@ -45,7 +48,10 @@ class AndroidSecureStore extends SecureStore {
   Future<String?> read(String key) async {
     try {
       return await _channel.invokeMethod<String>('get', {'key': key});
-    } on PlatformException {
+    } on PlatformException catch (e) {
+      // Хранилище недоступно/пересоздано (см. MainActivity): как «нет
+      // значения», потребуется повторный вход (§9).
+      dlog('[secure] read failed (${e.code}): ${e.message}');
       return null;
     }
   }
@@ -69,6 +75,16 @@ class AndroidSecureStore extends SecureStore {
 
 /// CRYPTPROTECT_UI_FORBIDDEN — без диалогов (фоновое обновление токенов).
 const int _cryptProtectUiForbidden = 0x1;
+
+/// Сбой CryptProtectData/CryptUnprotectData (ожидаемый, в отличие от
+/// программных ошибок).
+class _DpapiException implements Exception {
+  final String message;
+  _DpapiException(this.message);
+
+  @override
+  String toString() => '_DpapiException: $message';
+}
 
 class WindowsDpapiStore extends SecureStore {
   Directory? _dir;
@@ -96,14 +112,14 @@ class WindowsDpapiStore extends SecureStore {
         output,
       );
       if (result.value != true) {
-        throw StateError('CryptProtectData failed: ${result.error}');
+        throw _DpapiException('CryptProtectData failed: ${result.error}');
       }
-      return Uint8List.fromList(
+      final bytes = Uint8List.fromList(
           output.ref.pbData.asTypedList(output.ref.cbData));
-    } finally {
-      LocalFree(HLOCAL(input.ref.pbData));
       LocalFree(HLOCAL(output.ref.pbData));
-      calloc.free(input);
+      return bytes;
+    } finally {
+      _freeBlob(input);
       calloc.free(output);
     }
   }
@@ -121,16 +137,23 @@ class WindowsDpapiStore extends SecureStore {
         output,
       );
       if (result.value != true) {
-        throw StateError('CryptUnprotectData failed: ${result.error}');
+        throw _DpapiException('CryptUnprotectData failed: ${result.error}');
       }
-      return Uint8List.fromList(
+      final bytes = Uint8List.fromList(
           output.ref.pbData.asTypedList(output.ref.cbData));
-    } finally {
-      LocalFree(HLOCAL(input.ref.pbData));
       LocalFree(HLOCAL(output.ref.pbData));
-      calloc.free(input);
+      return bytes;
+    } finally {
+      _freeBlob(input);
       calloc.free(output);
     }
+  }
+
+  /// Входной блоб выделен через calloc — освобождается calloc, не LocalFree;
+  /// LocalFree применим только к выходному буферу, выделенному DPAPI.
+  void _freeBlob(ffi.Pointer<CRYPT_INTEGER_BLOB> blob) {
+    calloc.free(blob.ref.pbData);
+    calloc.free(blob);
   }
 
   ffi.Pointer<CRYPT_INTEGER_BLOB> _allocBlob(List<int> bytes) {
@@ -150,9 +173,16 @@ class WindowsDpapiStore extends SecureStore {
     try {
       final encrypted = base64Decode(await file.readAsString());
       return utf8.decode(_unprotect(encrypted));
-    } catch (_) {
-      // Повреждённая запись DPAPI (например, смена пользователя) —
-      // трактуем как отсутствие значения; потребуется повторный вход (§9).
+    } on FileSystemException catch (e) {
+      dlog('[secure] read "$key" failed: ${e.message}');
+      return null;
+    } on FormatException catch (e) {
+      dlog('[secure] read "$key": corrupted record: ${e.message}');
+      return null;
+    } on _DpapiException catch (e) {
+      // Запись от другого пользователя Windows/повреждена — как «нет
+      // значения»; потребуется повторный вход (§9).
+      dlog('[secure] read "$key": ${e.message}');
       return null;
     }
   }
@@ -161,8 +191,12 @@ class WindowsDpapiStore extends SecureStore {
   Future<void> write(String key, String value) async {
     final dir = await _secureDir();
     final encrypted = _protect(utf8.encode(value));
-    await File(p.join(dir.path, '$key.bin'))
-        .writeAsString(base64Encode(encrypted), flush: true);
+    // Атомарно: временный файл + rename, чтобы сбой не оставил обрезанную
+    // запись.
+    final target = File(p.join(dir.path, '$key.bin'));
+    final temp = File('${target.path}.tmp');
+    await temp.writeAsString(base64Encode(encrypted), flush: true);
+    await temp.rename(target.path);
   }
 
   @override

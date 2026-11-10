@@ -41,10 +41,7 @@ class TaskRow extends StatelessWidget {
             SizedBox(
               width: 32,
               height: 32,
-              child: Checkbox(
-                value: done,
-                onChanged: (_) => onToggle(),
-              ),
+              child: Checkbox(value: done, onChanged: (_) => onToggle()),
             ),
             const SizedBox(width: 4),
             Expanded(
@@ -54,17 +51,15 @@ class TaskRow extends StatelessWidget {
                   Text(
                     task.content,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          decoration:
-                              done ? TextDecoration.lineThrough : null,
-                        ),
+                      decoration: done ? TextDecoration.lineThrough : null,
+                    ),
                   ),
                   if (dueText != null) ...[
                     const SizedBox(height: 2),
                     Text(
                       dueText,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: dueAccent(context),
-                          ),
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: dueAccent(context)),
                     ),
                   ],
                 ],
