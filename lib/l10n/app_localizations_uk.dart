@@ -19,9 +19,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get newNote => 'Нова нотатка';
 
   @override
-  String get newTask => 'Додати завдання';
-
-  @override
   String get search => 'Пошук';
 
   @override
@@ -85,9 +82,6 @@ class AppLocalizationsUk extends AppLocalizations {
   String get noFolder => 'Без папки';
 
   @override
-  String get noList => 'Без списку';
-
-  @override
   String get addTask => 'Додати завдання';
 
   @override
@@ -111,19 +105,10 @@ class AppLocalizationsUk extends AppLocalizations {
   String get priorityLabel => 'Пріоритет';
 
   @override
-  String get remindersLabel => 'Нагадування';
-
-  @override
-  String get repeatLabel => 'Повторення';
-
-  @override
   String get tagsLabel => 'Теги';
 
   @override
   String get subtasksLabel => 'Підзавдання';
-
-  @override
-  String get noRepeat => 'Не повторювати';
 
   @override
   String get priorityHigh => 'Високий';
@@ -184,17 +169,10 @@ class AppLocalizationsUk extends AppLocalizations {
   String get deleteFolderConfirm => 'Видалити папку з усім вмістом у кошик?';
 
   @override
-  String get deleteTagConfirm =>
-      'Видалити тег? Мітки буде знято, записи залишаться.';
-
-  @override
   String get trashEmpty => 'Кошик порожній';
 
   @override
   String get searchHint => 'Пошук нотаток і завдань';
-
-  @override
-  String get searchResults => 'Результати';
 
   @override
   String get noResults => 'Нічого не знайдено';
@@ -229,16 +207,6 @@ class AppLocalizationsUk extends AppLocalizations {
       'Хмара не підключена — усе зберігається локально (етап 3).';
 
   @override
-  String get notificationsSection => 'Нотифікації';
-
-  @override
-  String get notificationsLocalDevice =>
-      'Налаштування нотифікацій діють на цьому пристрої (етап 5).';
-
-  @override
-  String get windowsOpenApp => 'Відкрити';
-
-  @override
   String get pinned => 'Закріплені';
 
   @override
@@ -256,21 +224,10 @@ class AppLocalizationsUk extends AppLocalizations {
   }
 
   @override
-  String get standaloneList => 'самостійний';
-
-  @override
-  String notesSuffix(int n) {
-    return '$n нотаток';
-  }
-
-  @override
   String get emptyNotes => 'Нотаток немає';
 
   @override
   String get emptyNotesHint => 'Створіть першу нотатку';
-
-  @override
-  String get dataLayerReady => 'Слой даних готовий';
 
   @override
   String get signIn => 'Увійти через Google';
@@ -354,4 +311,129 @@ class AppLocalizationsUk extends AppLocalizations {
   @override
   String get debugAcceptSnapshotWarning =>
       'Сервер перейшов на новий знімок даних. Прийняття затре несинхронізовані локальні зміни. Прийняти новий знімок?';
+
+  @override
+  String get newFolder => 'Нова папка';
+
+  @override
+  String get folderNameHint => 'Назва папки';
+
+  @override
+  String get rename => 'Перейменувати';
+
+  @override
+  String get newList => 'Новий список';
+
+  @override
+  String get listTitleHint => 'Назва списку';
+
+  @override
+  String get deleteListConfirm => 'Видалити список із завданнями у кошик?';
+
+  @override
+  String get taskTextHint => 'Що потрібно зробити?';
+
+  @override
+  String get subtaskHint => 'Назва підзавдання';
+
+  @override
+  String get noteTitleHint => 'Назва нотатки';
+
+  @override
+  String get noteBodyHint => 'Почніть писати…';
+
+  @override
+  String get tagNameHint => 'Назва нового тега';
+
+  @override
+  String get saveFailed =>
+      'Не вдалося зберегти нотатку. Зміни залишаються в редакторі.';
+
+  @override
+  String get emptyListHint => 'У списку ще немає завдань';
+
+  @override
+  String get openList => 'Відкрити список';
+
+  @override
+  String get close => 'Закрити';
+
+  @override
+  String get settingsTooltip => 'Налаштування';
+
+  @override
+  String get changeDate => 'Змінити дату';
+
+  @override
+  String get setTime => 'Вказати час';
+
+  @override
+  String get removeTime => 'Прибрати час';
+
+  @override
+  String get clearDue => 'Прибрати термін';
+
+  @override
+  String get syncing => 'Синхронізація…';
+
+  @override
+  String pendingChangesN(int n) {
+    return 'Очікують синхронізації: $n';
+  }
+
+  @override
+  String get epochSwitchPending =>
+      'Потрібне рішення щодо нового знімка (Діагностика)';
+
+  @override
+  String get signInFailed => 'Не вдалося увійти';
+
+  @override
+  String get errorDetails => 'Деталі';
+
+  @override
+  String get actionFailed => 'Не вдалося виконати дію';
+
+  @override
+  String get dropForbidden => 'Таке переміщення неможливе';
+
+  @override
+  String get restored => 'Відновлено';
+
+  @override
+  String get folder => 'Папка';
+
+  @override
+  String get yes => 'так';
+
+  @override
+  String get no => 'ні';
+
+  @override
+  String debugSession(String value) {
+    return 'Сесія: $value';
+  }
+
+  @override
+  String debugSync(String running, String last, int pending) {
+    return 'Синхронізація: $running · остання: $last · у черзі: $pending';
+  }
+
+  @override
+  String get debugIdle => 'очікує';
+
+  @override
+  String debugError(String error, String denied, String mismatch) {
+    return 'Помилка: $error (доступ заборонено: $denied, інший акаунт: $mismatch)';
+  }
+
+  @override
+  String debugCounters(int outbox, int conflicts) {
+    return 'У черзі: $outbox · конфлікти: $conflicts';
+  }
+
+  @override
+  String conflictEntity(String type, String id) {
+    return '$type · $id';
+  }
 }
