@@ -2,47 +2,92 @@
 /// с подзадачами, сворачиваемая область «Виконані» (§4).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/tasks_service.dart';
 import '../../db/app_database.dart';
+import '../../domain/due_spec.dart';
+import '../../domain/task_sort.dart';
+import '../../domain/task_sort_input.dart';
 import '../../l10n/app_localizations.dart';
 import '../app_theme.dart';
+import '../common/dialogs.dart';
 import '../common/task_actions.dart';
 import '../common/task_dnd.dart';
 import '../common/task_row.dart';
 import '../providers.dart';
+import '../queries.dart';
+
+/// Порядок задач списка по его режиму сортировки (§4). Сравниваются соседи;
+/// ручной порядок — последний критерий компараторов домена.
+List<Task> sortTasksForList(SortMode mode, List<Task> tasks) {
+  if (mode == SortMode.manual) return tasks;
+  TaskSortInput input(Task t) => TaskSortInput(
+        priority: t.priority,
+        due: dueSpecFromRow(t),
+        manualOrder: t.manualOrder,
+      );
+  return [...tasks]..sort((a, b) => mode == SortMode.due
+      ? compareByDue(input(a), input(b))
+      : compareByPriority(input(a), input(b)));
+}
 
 /// Карточка одного списка задач.
-class TaskListCard extends ConsumerWidget {
+class TaskListCard extends ConsumerStatefulWidget {
   final String listId;
 
   /// block_id embed'а — для временной подсветки при переходе (§4).
   final String? blockId;
   final void Function(Task task) onOpenTask;
 
+  /// Заголовок внутри карточки; экран списка показывает его в AppBar.
+  final bool showTitle;
+
   const TaskListCard({
     super.key,
     required this.listId,
     this.blockId,
     required this.onOpenTask,
+    this.showTitle = true,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l10n = AppLocalizations.of(context)!;
-    final lists = ref.watch(listsServiceProvider);
-    final tasks = ref.watch(tasksServiceProvider);
+  ConsumerState<TaskListCard> createState() => _TaskListCardState();
+}
 
-    final listFuture = lists.get(listId);
-    final highlighted = blockId != null &&
-        ref.watch(embedHighlightProvider) == blockId;
-    if (highlighted) {
-      Future.delayed(const Duration(seconds: 2), () {
+class _TaskListCardState extends ConsumerState<TaskListCard> {
+  Timer? _highlightTimer;
+
+  @override
+  void dispose() {
+    _highlightTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Подсветка снимается через 2 с после включения.
+  void _onHighlightChanged(String? previous, String? next) {
+    if (next == null || next != widget.blockId) return;
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      if (ref.read(embedHighlightProvider) == widget.blockId) {
         ref.read(embedHighlightProvider.notifier).state = null;
-      });
-    }
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final tasks = ref.watch(tasksServiceProvider);
+    ref.listen<String?>(embedHighlightProvider, _onHighlightChanged);
+    final highlighted = widget.blockId != null &&
+        ref.watch(embedHighlightProvider) == widget.blockId;
+    final listAsync = ref.watch(taskListProvider(widget.listId));
+
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
@@ -55,43 +100,54 @@ class TaskListCard extends ConsumerWidget {
         ),
       ),
       clipBehavior: Clip.antiAlias,
-      child: FutureBuilder<TaskList>(
-        future: listFuture,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Padding(
-              padding: EdgeInsets.all(16),
-              child: SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            );
-          }
-          final list = snapshot.data!;
+      child: listAsync.when(
+        loading: () => const Padding(
+          padding: EdgeInsets.all(16),
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+        error: (e, _) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(l10n.actionFailed),
+        ),
+        data: (list) {
+          if (list == null) return const SizedBox.shrink();
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-                child: Text(
-                  list.title ?? l10n.untitled,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700),
+              if (widget.showTitle)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                  child: Text(
+                    list.isSystem ? l10n.inbox : (list.title ?? l10n.untitled),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
                 ),
-              ),
               _ActiveTasks(
-                listId: listId,
-                onOpenTask: onOpenTask,
+                listId: widget.listId,
+                sortMode: list.sortMode,
+                onOpenTask: widget.onOpenTask,
               ),
               _CompletedSection(
-                listId: listId,
+                listId: widget.listId,
                 tasksService: tasks,
-                onOpenTask: onOpenTask,
+                onOpenTask: widget.onOpenTask,
               ),
-              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.add, size: 18),
+                  label: Text(l10n.addTask),
+                  onPressed: () =>
+                      showQuickAddTask(context, ref, widget.listId),
+                ),
+              ),
             ],
           );
         },
@@ -103,9 +159,14 @@ class TaskListCard extends ConsumerWidget {
 /// Активные корневые задачи с деревом подзадач.
 class _ActiveTasks extends ConsumerWidget {
   final String listId;
+  final SortMode sortMode;
   final void Function(Task task) onOpenTask;
 
-  const _ActiveTasks({required this.listId, required this.onOpenTask});
+  const _ActiveTasks({
+    required this.listId,
+    required this.sortMode,
+    required this.onOpenTask,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -113,8 +174,12 @@ class _ActiveTasks extends ConsumerWidget {
     return StreamBuilder<List<Task>>(
       stream: tasks.watchActiveInList(listId),
       builder: (context, snapshot) {
-        final all = snapshot.data ?? const <Task>[];
-        final roots = all.where((t) => t.parentId == null).toList();
+        final all = sortTasksForList(
+            sortMode, snapshot.data ?? const <Task>[]);
+        // Выполненные корни показывает область «Виконані».
+        final roots = all
+            .where((t) => t.parentId == null && t.completedAt == null)
+            .toList();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -122,6 +187,7 @@ class _ActiveTasks extends ConsumerWidget {
               _TaskBranch(
                 task: root,
                 all: all,
+                reorderEnabled: sortMode == SortMode.manual,
                 onOpenTask: onOpenTask,
               ),
           ],
@@ -135,11 +201,13 @@ class _ActiveTasks extends ConsumerWidget {
 class _TaskBranch extends ConsumerWidget {
   final Task task;
   final List<Task> all;
+  final bool reorderEnabled;
   final void Function(Task task) onOpenTask;
 
   const _TaskBranch({
     required this.task,
     required this.all,
+    required this.reorderEnabled,
     required this.onOpenTask,
   });
 
@@ -152,8 +220,7 @@ class _TaskBranch extends ConsumerWidget {
         TaskDndRow(
           task: task,
           allTasks: all,
-          onToggle: () => toggleTaskCompletion(context, tasks, task),
-          onOpen: () => onOpenTask(task),
+          reorderEnabled: reorderEnabled,
           child: TaskRow(
             task: task,
             onToggle: () => toggleTaskCompletion(context, tasks, task),
@@ -166,6 +233,7 @@ class _TaskBranch extends ConsumerWidget {
             child: _TaskBranch(
               task: child,
               all: all,
+              reorderEnabled: reorderEnabled,
               onOpenTask: onOpenTask,
             ),
           ),
@@ -175,7 +243,7 @@ class _TaskBranch extends ConsumerWidget {
 }
 
 /// Сворачиваемая область выполненных корневых задач («Виконані», §4).
-class _CompletedSection extends ConsumerStatefulWidget {
+class _CompletedSection extends StatefulWidget {
   final String listId;
   final TasksService tasksService;
   final void Function(Task task) onOpenTask;
@@ -187,10 +255,10 @@ class _CompletedSection extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<_CompletedSection> createState() => _CompletedSectionState();
+  State<_CompletedSection> createState() => _CompletedSectionState();
 }
 
-class _CompletedSectionState extends ConsumerState<_CompletedSection> {
+class _CompletedSectionState extends State<_CompletedSection> {
   bool _expanded = false;
 
   @override
@@ -246,30 +314,11 @@ Future<void> showQuickAddTask(
   WidgetRef ref,
   String listId,
 ) async {
-  final tasks = ref.watch(tasksServiceProvider);
-  final controller = TextEditingController();
-  final text = await showDialog<String>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        decoration: const InputDecoration(hintText: ' '),
-        onSubmitted: (v) => Navigator.pop(ctx, v),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: Text(AppLocalizations.of(ctx)!.cancel),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(ctx, controller.text),
-          child: Text(AppLocalizations.of(ctx)!.ok),
-        ),
-      ],
-    ),
+  final tasks = ref.read(tasksServiceProvider);
+  final text = await showTextInputDialog(
+    context,
+    hint: AppLocalizations.of(context)!.taskTextHint,
   );
-  if (text != null && text.trim().isNotEmpty) {
-    await tasks.create(listId, text: text.trim());
-  }
+  if (text == null) return;
+  await tasks.create(listId, text: text);
 }

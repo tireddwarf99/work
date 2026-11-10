@@ -9,6 +9,8 @@ class SectionCard extends StatelessWidget {
   final String title;
   final bool initiallyExpanded;
   final VoidCallback? onAdd;
+  final String? addTooltip;
+  final List<Widget> actions;
   final ValueChanged<bool>? onExpansionChanged;
   final List<Widget> children;
   final EdgeInsets padding;
@@ -18,6 +20,8 @@ class SectionCard extends StatelessWidget {
     required this.title,
     this.initiallyExpanded = true,
     this.onAdd,
+    this.addTooltip,
+    this.actions = const [],
     this.onExpansionChanged,
     this.children = const [],
     this.padding = const EdgeInsets.all(16),
@@ -29,6 +33,8 @@ class SectionCard extends StatelessWidget {
       title: title,
       initiallyExpanded: initiallyExpanded,
       onAdd: onAdd,
+      addTooltip: addTooltip,
+      actions: actions,
       onExpansionChanged: onExpansionChanged,
       padding: padding,
       children: children,
@@ -40,6 +46,8 @@ class _CollapsibleCard extends StatefulWidget {
   final String title;
   final bool initiallyExpanded;
   final VoidCallback? onAdd;
+  final String? addTooltip;
+  final List<Widget> actions;
   final ValueChanged<bool>? onExpansionChanged;
   final List<Widget> children;
   final EdgeInsets padding;
@@ -48,6 +56,8 @@ class _CollapsibleCard extends StatefulWidget {
     required this.title,
     required this.initiallyExpanded,
     required this.onAdd,
+    required this.addTooltip,
+    required this.actions,
     required this.onExpansionChanged,
     required this.children,
     required this.padding,
@@ -103,10 +113,12 @@ class _CollapsibleCardState extends State<_CollapsibleCard> {
                           ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                   ),
+                  ...widget.actions,
                   if (widget.onAdd != null)
                     IconButton(
                       icon: const Icon(Icons.add),
                       color: theme.colorScheme.primary,
+                      tooltip: widget.addTooltip,
                       onPressed: widget.onAdd,
                     ),
                 ],

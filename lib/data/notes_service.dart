@@ -22,19 +22,16 @@ class NotesService {
 
   Future<Note> create({String? folderId, String? title}) {
     return _db.transaction(() async {
-      final order = await _nextManualOrder(folderId);
       final id = _uuid.v4();
-      final now = DateTime.now().toUtc();
       await _db.into(_db.notes).insert(NotesCompanion.insert(
             id: id,
             folderId: Value(folderId),
             title: Value(title),
-            manualOrder: Value(order),
-            modifiedAt: Value(now),
+            manualOrder: Value(await _nextManualOrder(folderId)),
+            modifiedAt: Value(DateTime.now().toUtc()),
           ));
-      final created = await _get(id);
-      await _ledger.recordUpsert(SyncEntityType.note, id, created.toJson());
-      return created;
+      await _ledger.recordSnapshot(SyncEntityType.note, id);
+      return _get(id);
     });
   }
 
@@ -52,13 +49,9 @@ class NotesService {
           deltaFormatVersion: const Value(kNoteDeltaFormatVersion),
           searchText: Value(deltaToPlainText(delta)),
           title: title == null ? const Value.absent() : Value(title),
-          modifiedAt: Value(DateTime.now().toUtc()),
-          revision: const Value.absent(), // bump ниже
         ),
       );
-      await _bumpRevision(id);
-      await _ledger.recordUpsert(
-          SyncEntityType.note, id, (await _get(id)).toJson());
+      await _ledger.recordChange(SyncEntityType.note, id);
     });
   }
 
@@ -73,15 +66,9 @@ class NotesService {
         pinOrder = (await q.getSingle().then((r) => r.read(maxExp)) ?? 0) + 1;
       }
       await (_db.update(_db.notes)..where((n) => n.id.equals(id))).write(
-        NotesCompanion(
-          pinned: Value(pinned),
-          pinOrder: Value(pinOrder),
-          modifiedAt: Value(DateTime.now().toUtc()),
-        ),
+        NotesCompanion(pinned: Value(pinned), pinOrder: Value(pinOrder)),
       );
-      await _bumpRevision(id);
-      await _ledger.recordUpsert(
-          SyncEntityType.note, id, (await _get(id)).toJson());
+      await _ledger.recordChange(SyncEntityType.note, id);
     });
   }
 
@@ -92,32 +79,20 @@ class NotesService {
         NotesCompanion(
           folderId: Value(folderId),
           manualOrder: Value(await _nextManualOrder(folderId)),
-          modifiedAt: Value(DateTime.now().toUtc()),
         ),
       );
-      await _bumpRevision(id);
-      await _ledger.recordUpsert(
-          SyncEntityType.note, id, (await _get(id)).toJson());
+      await _ledger.recordChange(SyncEntityType.note, id);
     });
   }
 
   /// Перечень заметок: закреплённые выше, их порядок ручной; остальные —
   /// по последнему изменению, свежие выше (§4).
   Future<List<Note>> listInFolder(String? folderId,
-      {bool includeTrashed = false}) {
-    return (_db.select(_db.notes)
-          ..where((n) =>
-              n.folderId.equalsNullable(folderId) &
-              (includeTrashed ? const Constant(true) : n.deletedAt.isNull()))
-          ..orderBy([
-            (n) => OrderingTerm.desc(n.pinned),
-            (n) => OrderingTerm.asc(n.pinOrder, nulls: NullsOrder.last),
-            (n) => OrderingTerm.desc(n.modifiedAt),
-          ]))
-        .get();
-  }
+          {bool includeTrashed = false}) =>
+      _inFolder(folderId, includeTrashed).get();
 
   Future<Note> get(String id) => _get(id);
+
   /// Реактивная одна заметка.
   Stream<Note> watchSingle(String id) =>
       (_db.select(_db.notes)..where((n) => n.id.equals(id))).watchSingle();
@@ -125,17 +100,7 @@ class NotesService {
   /// Реактивный перечень заметок папки для UI (§4: закреплённые выше).
   Stream<List<Note>> watchInFolder(String? folderId,
           {bool includeTrashed = false}) =>
-      (_db.select(_db.notes)
-            ..where((n) =>
-                n.folderId.equalsNullable(folderId) &
-                (includeTrashed ? const Constant(true) : n.deletedAt.isNull()))
-            ..orderBy([
-              (n) => OrderingTerm.desc(n.pinned),
-              (n) => OrderingTerm.asc(n.pinOrder, nulls: NullsOrder.last),
-              (n) => OrderingTerm.desc(n.modifiedAt),
-            ]))
-          .watch();
-
+      _inFolder(folderId, includeTrashed).watch();
 
   /// Ручной порядок закреплённых (§4): ставим заметку после [afterId]
   /// (null — в начало); порядок синхронизируется через outbox.
@@ -154,14 +119,12 @@ class NotesService {
       }
       pinned.insert(anchorIndex + 1, note);
       for (var i = 0; i < pinned.length; i++) {
-        await (_db.update(_db.notes)..where((n) => n.id.equals(pinned[i].id)))
-            .write(NotesCompanion(
-                pinOrder: Value(i + 1),
-                modifiedAt: Value(DateTime.now().toUtc())));
+        final current = pinned[i];
+        if (current.id != id && current.pinOrder == i + 1) continue;
+        await (_db.update(_db.notes)..where((n) => n.id.equals(current.id)))
+            .write(NotesCompanion(pinOrder: Value(i + 1)));
+        await _ledger.recordChange(SyncEntityType.note, current.id);
       }
-      await _bumpRevision(id);
-      await _ledger.recordUpsert(
-          SyncEntityType.note, id, (await _get(id)).toJson());
     });
   }
 
@@ -169,11 +132,9 @@ class NotesService {
   /// пользователь (§11), работа со списками — TaskListsService.
   Future<void> moveToTrash(String id) {
     return _db.transaction(() async {
-      await (_db.update(_db.notes)..where((n) => n.id.equals(id))).write(
-        NotesCompanion(deletedAt: Value(DateTime.now().toUtc())),
-      );
-      await _bumpRevision(id);
-      await _ledger.recordDeletion(SyncEntityType.note, id);
+      await (_db.update(_db.notes)..where((n) => n.id.equals(id)))
+          .write(NotesCompanion(deletedAt: Value(DateTime.now().toUtc())));
+      await _ledger.recordTrashed(SyncEntityType.note, id);
     });
   }
 
@@ -202,10 +163,17 @@ class NotesService {
       await (_db.select(_db.notes)..where((n) => n.id.equals(id)))
           .getSingle();
 
-  Future<void> _bumpRevision(String id) async {
-    await _db.customStatement(
-        'UPDATE notes SET revision = revision + 1 WHERE id = ?', [id]);
-  }
+  SimpleSelectStatement<$NotesTable, Note> _inFolder(
+          String? folderId, bool includeTrashed) =>
+      _db.select(_db.notes)
+        ..where((n) =>
+            n.folderId.equalsNullable(folderId) &
+            (includeTrashed ? const Constant(true) : n.deletedAt.isNull()))
+        ..orderBy([
+          (n) => OrderingTerm.desc(n.pinned),
+          (n) => OrderingTerm.asc(n.pinOrder, nulls: NullsOrder.last),
+          (n) => OrderingTerm.desc(n.modifiedAt),
+        ]);
 
   Future<int> _nextManualOrder(String? folderId) async {
     final maxExp = _db.notes.manualOrder.max();

@@ -9,10 +9,13 @@ import '../../db/app_database.dart';
 import '../../domain/due_spec.dart';
 import '../../l10n/app_localizations.dart';
 import '../app_theme.dart';
-import '../common/task_actions.dart';
+import '../common/dialogs.dart';
 import '../common/due_label.dart';
+import '../common/tag_actions.dart';
+import '../common/task_actions.dart';
 import '../common/task_row.dart';
 import '../providers.dart';
+import '../queries.dart';
 
 /// Детали задачи; [onClose] для боковой панели Windows.
 class TaskDetails extends ConsumerStatefulWidget {
@@ -25,23 +28,23 @@ class TaskDetails extends ConsumerStatefulWidget {
   ConsumerState<TaskDetails> createState() => _TaskDetailsState();
 }
 
+enum _DueAction { changeDate, setTime, removeTime, clear }
+
 class _TaskDetailsState extends ConsumerState<TaskDetails> {
-  late Future<Task?> _task;
   final _descriptionController = TextEditingController();
-  bool _descriptionInitialized = false;
+
+  /// Подзадача, открытая внутри панели; null — показывается [TaskDetails.taskId].
+  String? _openedId;
+
+  /// Задача, чьё описание сейчас в поле ввода.
+  String? _descriptionTaskId;
+
+  String get _id => _openedId ?? widget.taskId;
 
   @override
-  void initState() {
-    super.initState();
-    _task = _load();
-  }
-
-  Future<Task?> _load() async {
-    try {
-      return await ref.read(tasksServiceProvider).get(widget.taskId);
-    } on StateError {
-      return null;
-    }
+  void didUpdateWidget(covariant TaskDetails oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.taskId != widget.taskId) _openedId = null;
   }
 
   @override
@@ -50,82 +53,91 @@ class _TaskDetailsState extends ConsumerState<TaskDetails> {
     super.dispose();
   }
 
+  void _close() {
+    final onClose = widget.onClose;
+    if (onClose != null) {
+      onClose();
+    } else {
+      Navigator.pop(context);
+    }
+  }
+
+  Future<void> _delete(Task task) async {
+    final deleted = await deleteTaskToTrash(
+        context, ref.read(tasksServiceProvider), task);
+    if (deleted && mounted) _close();
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final tasks = ref.watch(tasksServiceProvider);
+    final taskAsync = ref.watch(taskProvider(_id));
+    final task = taskAsync.value;
 
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
-          onPressed: () =>
-              widget.onClose != null ? widget.onClose!() : Navigator.pop(context),
+          tooltip: l10n.close,
+          onPressed: _close,
         ),
         title: Text(l10n.task),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.drive_file_move_outline),
-            tooltip: l10n.moveToFolder,
-            onPressed: () => _showMoveTaskDialog(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () async {
-              final task = await _task;
-              if (task == null || !context.mounted) return;
-              await deleteTaskToTrash(context, tasks, task);
-              if (!context.mounted) return;
-              if (widget.onClose != null) {
-                widget.onClose!();
-              } else {
-                Navigator.pop(context);
-              }
-            },
-          ),
+          if (task != null) ...[
+            IconButton(
+              icon: const Icon(Icons.drive_file_move_outline),
+              tooltip: l10n.moveToFolder,
+              onPressed: () => _showMoveTaskDialog(task),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: l10n.delete,
+              onPressed: () => _delete(task),
+            ),
+          ],
         ],
       ),
-      body: FutureBuilder<Task?>(
-        future: _task,
-        builder: (context, snapshot) {
-          final task = snapshot.data;
-          if (task == null) {
-            return const SizedBox.shrink();
-          }
-          if (!_descriptionInitialized) {
-            _descriptionController.text = task.description;
-            _descriptionInitialized = true;
-          }
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _titleRow(context, task),
-              const SizedBox(height: 8),
-              _sourceLink(context, task),
-              const Divider(height: 32),
-              // Описание (простой текст, §3).
-              Text(l10n.descriptionLabel, style: mutedStyle(context)),
-              TextField(
-                controller: _descriptionController,
-                maxLines: null,
-                decoration: InputDecoration(hintText: l10n.noDescription),
-                onChanged: (v) => tasks.updateDescription(task.id, v),
-              ),
-              const SizedBox(height: 16),
-              _dueRow(context, task),
-              _priorityRow(context, task),
-              _tagsRow(context, task),
-              const SizedBox(height: 16),
-              _subtasksSection(context, task),
-            ],
-          );
-        },
-      ),
+      body: task == null
+          ? (taskAsync.isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : const SizedBox.shrink())
+          : _body(context, l10n, task),
+    );
+  }
+
+  Widget _body(BuildContext context, AppLocalizations l10n, Task task) {
+    final tasks = ref.read(tasksServiceProvider);
+    if (_descriptionTaskId != task.id) {
+      _descriptionController.text = task.description;
+      _descriptionTaskId = task.id;
+    }
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _titleRow(context, task),
+        const SizedBox(height: 8),
+        _sourceLink(context, task),
+        const Divider(height: 32),
+        // Описание (простой текст, §3).
+        Text(l10n.descriptionLabel, style: mutedStyle(context)),
+        TextField(
+          controller: _descriptionController,
+          maxLines: null,
+          decoration: InputDecoration(hintText: l10n.noDescription),
+          onChanged: (v) => tasks.updateDescription(task.id, v),
+        ),
+        const SizedBox(height: 16),
+        _dueRow(context, task),
+        _priorityRow(context, task),
+        _tagsRow(context, task),
+        const SizedBox(height: 16),
+        _subtasksSection(context, task),
+      ],
     );
   }
 
   Widget _titleRow(BuildContext context, Task task) {
-    final tasks = ref.watch(tasksServiceProvider);
+    final tasks = ref.read(tasksServiceProvider);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -154,22 +166,15 @@ class _TaskDetailsState extends ConsumerState<TaskDetails> {
   }
 
   /// «Переместить…»: список назначения, недоступный на экране (§4).
-  Future<void> _showMoveTaskDialog(BuildContext context) async {
+  Future<void> _showMoveTaskDialog(Task task) async {
     final l10n = AppLocalizations.of(context)!;
-    final task = await _task;
-    if (task == null || !context.mounted) return;
     final lists = ref.read(listsServiceProvider);
-    final notes = ref.read(notesServiceProvider);
+    final tasks = ref.read(tasksServiceProvider);
 
     final inbox = await lists.inbox();
     final standalone = await lists.listStandalone();
-    final allNotes = await notes.listInFolder(null);
-    final embedded = <TaskList>[];
-    for (final note in allNotes) {
-      embedded.addAll(await lists.listInNote(note.id));
-    }
-
-    if (!context.mounted) return;
+    final embedded = await ref.read(embeddedListsProvider.future);
+    if (!mounted) return;
     final picked = await showDialog<String>(
       context: context,
       builder: (ctx) => SimpleDialog(
@@ -196,40 +201,27 @@ class _TaskDetailsState extends ConsumerState<TaskDetails> {
         ],
       ),
     );
-    if (picked == null || picked == task.listId || !context.mounted) return;
-    await ref
-        .read(tasksServiceProvider)
-        .moveBranch(task.id, newListId: picked, newParentId: null);
-    if (context.mounted) setState(() => _task = _load());
+    if (picked == null || picked == task.listId) return;
+    await tasks.moveBranch(task.id, newListId: picked, newParentId: null);
   }
 
   /// Переход к источнику: список, а для встроенного — заметка (§5).
   Widget _sourceLink(BuildContext context, Task task) {
     final l10n = AppLocalizations.of(context)!;
-    final lists = ref.watch(listsServiceProvider);
-    return FutureBuilder<TaskList>(
-      future: lists.get(task.listId),
-      builder: (context, snap) {
-        final list = snap.data;
-        if (list == null) return const SizedBox.shrink();
-        final source = list.title ?? l10n.inbox;
-        return Text(
-          '${list.isSystem ? l10n.inbox : source}'
-          '${list.noteId != null ? ' · ${l10n.note}' : ''}',
-          style: TextStyle(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.w600),
-        );
-      },
+    final list = ref.watch(taskListProvider(task.listId)).value;
+    if (list == null) return const SizedBox.shrink();
+    final source = list.isSystem ? l10n.inbox : (list.title ?? l10n.untitled);
+    return Text(
+      '$source${list.noteId != null ? ' · ${l10n.note}' : ''}',
+      style: TextStyle(
+          color: Theme.of(context).colorScheme.primary,
+          fontWeight: FontWeight.w600),
     );
   }
 
   Widget _dueRow(BuildContext context, Task task) {
     final l10n = AppLocalizations.of(context)!;
-    final tasks = ref.watch(tasksServiceProvider);
     final due = dueSpecFromRow(task);
-    final label = formatDatePart(due, l10n) ??
-        (due.hasTime ? null : l10n.noDue);
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: const Icon(Icons.grid_view),
@@ -244,41 +236,91 @@ class _TaskDetailsState extends ConsumerState<TaskDetails> {
           style: TextStyle(color: Theme.of(context).colorScheme.primary),
         ),
       ),
-      onTap: () async {
-        final date = await showDatePicker(
-          context: context,
-          initialDate: due.isNone ? DateTime.now() : _parseYmd(due.date!),
-          firstDate: DateTime(2000),
-          lastDate: DateTime(2100),
-        );
-        if (date == null) return;
-        if (!context.mounted) return;
-        if (due.hasTime) {
-          final time = await showTimePicker(
-            context: context,
-            initialTime:
-                TimeOfDay(hour: due.minutes! ~/ 60, minute: due.minutes! % 60),
-          );
-          if (time != null) {
-            await tasks.setDue(
-              task.id,
-              DueSpec.at(_ymd(date), time.hour * 60 + time.minute),
-            );
-          } else {
-            await tasks.setDue(task.id, DueSpec.dateOnly(_ymd(date)));
-          }
-        } else {
-          await tasks.setDue(task.id, DueSpec.dateOnly(_ymd(date)));
-        }
-        setState(() => _task = _load());
-      },
-      subtitle: label == null ? null : Text(label, style: mutedStyle(context)),
+      onTap: () => _editDue(task, due),
     );
+  }
+
+  /// Срок: дата, время, снятие времени и снятие срока целиком (§3).
+  Future<void> _editDue(Task task, DueSpec due) async {
+    final l10n = AppLocalizations.of(context)!;
+    final tasks = ref.read(tasksServiceProvider);
+    final _DueAction? action = due.isNone
+        ? _DueAction.changeDate
+        : await showDialog<_DueAction>(
+            context: context,
+            builder: (ctx) => SimpleDialog(
+              title: Text(l10n.dueLabel),
+              children: [
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, _DueAction.changeDate),
+                  child: Text(l10n.changeDate),
+                ),
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, _DueAction.setTime),
+                  child: Text(l10n.setTime),
+                ),
+                if (due.hasTime)
+                  SimpleDialogOption(
+                    onPressed: () =>
+                        Navigator.pop(ctx, _DueAction.removeTime),
+                    child: Text(l10n.removeTime),
+                  ),
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, _DueAction.clear),
+                  child: Text(l10n.clearDue),
+                ),
+              ],
+            ),
+          );
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case _DueAction.clear:
+        await tasks.setDue(task.id, const DueSpec.none());
+      case _DueAction.removeTime:
+        await tasks.setDue(task.id, DueSpec.dateOnly(due.date!));
+      case _DueAction.changeDate:
+        final date = await _pickDate(due.isNone ? null : due.date);
+        if (date == null) return;
+        await tasks.setDue(
+          task.id,
+          due.hasTime
+              ? DueSpec.at(date, due.minutes!)
+              : DueSpec.dateOnly(date),
+        );
+      case _DueAction.setTime:
+        final date = due.isNone ? await _pickDate(null) : due.date;
+        if (date == null || !mounted) return;
+        final initial = due.hasTime ? due.minutes! : TimeOfDay.now().hour * 60;
+        final time = await showTimePicker(
+          context: context,
+          initialTime: TimeOfDay(hour: initial ~/ 60, minute: initial % 60),
+        );
+        if (time == null) return;
+        await tasks.setDue(
+            task.id, DueSpec.at(date, time.hour * 60 + time.minute));
+    }
+  }
+
+  /// Выбор даты; возвращает `yyyy-MM-dd` или null при отмене.
+  Future<String?> _pickDate(String? current) async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: current == null ? DateTime.now() : parseYmd(current),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    return date == null ? null : formatYmd(date);
   }
 
   Widget _priorityRow(BuildContext context, Task task) {
     final l10n = AppLocalizations.of(context)!;
-    final tasks = ref.watch(tasksServiceProvider);
+    final tasks = ref.read(tasksServiceProvider);
+    String label(Priority p) => switch (p) {
+          Priority.high => l10n.priorityHigh,
+          Priority.normal => l10n.priorityNormal,
+          Priority.low => l10n.priorityLow,
+        };
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: const Icon(Icons.flag),
@@ -286,11 +328,7 @@ class _TaskDetailsState extends ConsumerState<TaskDetails> {
       trailing: SizedBox(
         width: 110,
         child: Text(
-          switch (task.priority) {
-            Priority.high => l10n.priorityHigh,
-            Priority.normal => l10n.priorityNormal,
-            Priority.low => l10n.priorityLow,
-          },
+          label(task.priority),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.right,
@@ -305,82 +343,40 @@ class _TaskDetailsState extends ConsumerState<TaskDetails> {
               for (final p in Priority.values)
                 SimpleDialogOption(
                   onPressed: () => Navigator.pop(ctx, p),
-                  child: Text(switch (p) {
-                    Priority.high => l10n.priorityHigh,
-                    Priority.normal => l10n.priorityNormal,
-                    Priority.low => l10n.priorityLow,
-                  }),
+                  child: Text(label(p)),
                 ),
             ],
           ),
         );
-        if (picked != null) {
-          await tasks.setPriority(task.id, picked);
-          if (context.mounted) setState(() => _task = _load());
-        }
+        if (picked != null) await tasks.setPriority(task.id, picked);
       },
     );
   }
 
   Widget _tagsRow(BuildContext context, Task task) {
     final l10n = AppLocalizations.of(context)!;
-    final tags = ref.watch(tagsServiceProvider);
+    final items = ref
+            .watch(tagsForProvider((kind: EntityKind.task, id: task.id)))
+            .value ??
+        const <Tag>[];
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: const Icon(Icons.label_outline),
       title: Text(l10n.tagsLabel),
-      subtitle: FutureBuilder<List<Tag>>(
-        future: tags.tagsFor(EntityKind.task, task.id),
-        builder: (context, snap) {
-          final items = snap.data ?? const <Tag>[];
-          if (items.isEmpty) return Text(l10n.noTags, style: mutedStyle(context));
-          return Wrap(
-            spacing: 6,
-            children: [for (final t in items) Text(t.name)],
-          );
-        },
-      ),
-      onTap: () async {
-        final available = await tags.listAll();
-        if (!context.mounted) return;
-        final controller = TextEditingController();
-        final picked = await showDialog<String>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: controller,
-                  onSubmitted: (v) => Navigator.pop(ctx, v),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  children: [
-                    for (final tag in available)
-                      ActionChip(
-                        label: Text(tag.name),
-                        onPressed: () => Navigator.pop(ctx, tag.id),
-                      ),
-                  ],
-                ),
-              ],
+      subtitle: items.isEmpty
+          ? Text(l10n.noTags, style: mutedStyle(context))
+          : Wrap(
+              spacing: 6,
+              children: [for (final t in items) Text(t.name)],
             ),
-          ),
-        );
-        if (picked == null || picked.isEmpty) return;
-        final isId = available.any((t) => t.id == picked);
-        final tagId = isId ? picked : (await tags.create(picked.trim())).id;
-        await tags.attach(EntityKind.task, task.id, tagId);
-        if (context.mounted) setState(() => _task = _load());
-      },
+      onTap: () => pickAndAttachTag(context, ref, EntityKind.task, task.id),
     );
   }
 
   Widget _subtasksSection(BuildContext context, Task task) {
     final l10n = AppLocalizations.of(context)!;
-    final tasks = ref.watch(tasksServiceProvider);
+    final tasks = ref.read(tasksServiceProvider);
+    final children = ref.watch(subtasksProvider(task.id)).value ?? const <Task>[];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -395,81 +391,34 @@ class _TaskDetailsState extends ConsumerState<TaskDetails> {
             ),
             IconButton(
               icon: const Icon(Icons.add),
-              onPressed: () async {
-                await showQuickAddSubtask(context, ref, task.id);
-                if (context.mounted) setState(() => _task = _load());
-              },
+              tooltip: l10n.addTask,
+              onPressed: () => showQuickAddSubtask(context, ref, task.id),
             ),
           ],
         ),
-        FutureBuilder<List<Task>>(
-          future: tasks.children(task.id),
-          builder: (context, snap) {
-            final children = snap.data ?? const <Task>[];
-            return Column(
-              children: [
-                for (final child in children)
-                  TaskRow(
-                    task: child,
-                    onToggle: () =>
-                        toggleTaskCompletion(context, tasks, child),
-                    onOpen: () => setState(() => _task = Future.value(child)),
-                  ),
-              ],
-            );
-          },
-        ),
+        for (final child in children)
+          TaskRow(
+            task: child,
+            onToggle: () => toggleTaskCompletion(context, tasks, child),
+            onOpen: () => setState(() => _openedId = child.id),
+          ),
       ],
     );
   }
 }
 
+/// Быстрое добавление подзадачи.
 Future<void> showQuickAddSubtask(
     BuildContext context, WidgetRef ref, String parentId) async {
-  final tasks = ref.watch(tasksServiceProvider);
+  final tasks = ref.read(tasksServiceProvider);
+  final hint = AppLocalizations.of(context)!.subtaskHint;
+  final text = await showTextInputDialog(context, hint: hint);
+  if (text == null) return;
   final parent = await tasks.get(parentId);
-  if (!context.mounted) return;
-  final controller = TextEditingController();
-  final text = await showDialog<String>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        onSubmitted: (v) => Navigator.pop(ctx, v),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: Text(AppLocalizations.of(ctx)!.cancel),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(ctx, controller.text),
-          child: Text(AppLocalizations.of(ctx)!.ok),
-        ),
-      ],
-    ),
-  );
-  if (text != null && text.trim().isNotEmpty) {
-    await tasks.create(parent.listId, parentId: parentId, text: text.trim());
-  }
+  await tasks.create(parent.listId, parentId: parentId, text: text);
 }
-
-String _ymd(DateTime d) =>
-    '${d.year.toString().padLeft(4, '0')}-'
-    '${d.month.toString().padLeft(2, '0')}-'
-    '${d.day.toString().padLeft(2, '0')}';
-
-DateTime _parseYmd(String ymd) => DateTime(
-    int.parse(ymd.substring(0, 4)),
-    int.parse(ymd.substring(5, 7)),
-    int.parse(ymd.substring(8, 10)));
 
 String _dueText(DueSpec due, AppLocalizations l10n) {
   final date = formatDatePart(due, l10n) ?? l10n.noDue;
-  if (due.hasTime) {
-    final mm = (due.minutes! % 60).toString().padLeft(2, '0');
-    return '$date, ${(due.minutes! ~/ 60).toString().padLeft(2, '0')}:$mm';
-  }
-  return date;
+  return due.hasTime ? '$date, ${formatMinutes(due.minutes!)}' : date;
 }
