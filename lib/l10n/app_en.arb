@@ -3,7 +3,6 @@
   "appTitle": "Notes",
   "create": "Create",
   "newNote": "New note",
-  "newTask": "Add task",
   "search": "Search",
   "dashboard": "Overview",
   "notes": "Notes",
@@ -25,20 +24,22 @@
   "tomorrow": "Tomorrow",
   "yesterday": "Yesterday",
   "noFolder": "No folder",
-  "noList": "No list",
   "addTask": "Add task",
   "completedN": "Completed · {n}",
-  "@completedN": { "placeholders": { "n": { "type": "int" } } },
+  "@completedN": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "note": "Note",
   "task": "Task",
   "descriptionLabel": "DESCRIPTION",
   "dueLabel": "Due",
   "priorityLabel": "Priority",
-  "remindersLabel": "Reminders",
-  "repeatLabel": "Repeat",
   "tagsLabel": "Tags",
   "subtasksLabel": "Subtasks",
-  "noRepeat": "Do not repeat",
   "priorityHigh": "High",
   "priorityNormal": "Normal",
   "priorityLow": "Low",
@@ -58,10 +59,8 @@
   "deleteTaskConfirm": "Move this task with its subtasks to trash?",
   "deleteNoteConfirm": "Move this note to trash?",
   "deleteFolderConfirm": "Move this folder with all its contents to trash?",
-  "deleteTagConfirm": "Delete tag? Labels are removed, entries stay.",
   "trashEmpty": "Trash is empty",
   "searchHint": "Search notes and tasks",
-  "searchResults": "Results",
   "noResults": "Nothing found",
   "movedToNoFolderHint": "The original folder was deleted — note restored without a folder.",
   "themeLight": "Light",
@@ -72,21 +71,20 @@
   "systemLanguage": "System",
   "accountSection": "Account",
   "accountLocalOnly": "Cloud is not connected — everything is stored locally (stage 3).",
-  "notificationsSection": "Notifications",
-  "notificationsLocalDevice": "Notification settings apply to this device (stage 5).",
-  "windowsOpenApp": "Open",
   "pinned": "Pinned",
   "pin": "Pin",
   "unpin": "Unpin",
   "moveToFolder": "Move…",
   "embeddedFrom": "embedded · {source}",
-  "@embeddedFrom": { "placeholders": { "source": { "type": "String" } } },
-  "standaloneList": "standalone",
-  "notesSuffix": "{n} notes",
-  "@notesSuffix": { "placeholders": { "n": { "type": "int" } } },
+  "@embeddedFrom": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
   "emptyNotes": "No notes",
   "emptyNotesHint": "Create your first note",
-  "dataLayerReady": "Data layer ready",
   "signIn": "Sign in with Google",
   "signOut": "Sign out",
   "signOutQuestion": "Keep a local copy of your data on this device?",
@@ -112,5 +110,102 @@
   "debugLogTitle": "Event log",
   "debugLogEmpty": "No events yet",
   "debugAcceptSnapshot": "Accept new snapshot",
-  "debugAcceptSnapshotWarning": "The server switched to a newer data snapshot. Accepting will discard unsynced local changes. Accept the new snapshot?"
+  "debugAcceptSnapshotWarning": "The server switched to a newer data snapshot. Accepting will discard unsynced local changes. Accept the new snapshot?",
+  "newFolder": "New folder",
+  "folderNameHint": "Folder name",
+  "rename": "Rename",
+  "newList": "New list",
+  "listTitleHint": "List title",
+  "deleteListConfirm": "Move the list and its tasks to the trash?",
+  "taskTextHint": "What needs to be done?",
+  "subtaskHint": "Subtask name",
+  "noteTitleHint": "Note title",
+  "noteBodyHint": "Start writing…",
+  "tagNameHint": "New tag name",
+  "saveFailed": "Couldn't save the note. Your changes are still in the editor.",
+  "emptyListHint": "No tasks in this list yet",
+  "openList": "Open list",
+  "close": "Close",
+  "settingsTooltip": "Settings",
+  "changeDate": "Change date",
+  "setTime": "Set time",
+  "removeTime": "Remove time",
+  "clearDue": "Clear due date",
+  "syncing": "Syncing…",
+  "pendingChangesN": "Pending changes: {n}",
+  "@pendingChangesN": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "epochSwitchPending": "A decision on the new snapshot is required (Diagnostics)",
+  "signInFailed": "Sign-in failed",
+  "errorDetails": "Details",
+  "actionFailed": "The action failed",
+  "dropForbidden": "This move isn't possible",
+  "restored": "Restored",
+  "folder": "Folder",
+  "yes": "yes",
+  "no": "no",
+  "debugSession": "Session: {value}",
+  "@debugSession": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "debugSync": "Sync: {running} · last: {last} · queued: {pending}",
+  "@debugSync": {
+    "placeholders": {
+      "running": {
+        "type": "String"
+      },
+      "last": {
+        "type": "String"
+      },
+      "pending": {
+        "type": "int"
+      }
+    }
+  },
+  "debugIdle": "idle",
+  "debugError": "Error: {error} (permission denied: {denied}, other account: {mismatch})",
+  "@debugError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      },
+      "denied": {
+        "type": "String"
+      },
+      "mismatch": {
+        "type": "String"
+      }
+    }
+  },
+  "debugCounters": "Queued: {outbox} · conflicts: {conflicts}",
+  "@debugCounters": {
+    "placeholders": {
+      "outbox": {
+        "type": "int"
+      },
+      "conflicts": {
+        "type": "int"
+      }
+    }
+  },
+  "conflictEntity": "{type} · {id}",
+  "@conflictEntity": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "id": {
+        "type": "String"
+      }
+    }
+  }
 }
