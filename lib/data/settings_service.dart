@@ -1,10 +1,13 @@
 /// Настройки (§8): общие синхронизируются, локальные для устройства — нет.
-/// Значения — JSON-строки; типизация ключей задаётся вызывающим кодом UI.
+///
+/// Единый формат хранения: значение — JSON. [getDevice]/[getShared] отдают
+/// JSON-текст (структурные значения декодирует вызывающий код),
+/// [getString]/[setString] — простые строковые настройки без обёртки.
+/// `null` при записи удаляет настройку.
 library;
 
 import 'dart:convert';
 
-import 'package:drift/drift.dart';
 
 import '../db/app_database.dart';
 
@@ -13,53 +16,76 @@ class SettingsService {
 
   SettingsService(this._db);
 
-  Future<String?> getDevice(String key) => _get(_db.deviceSettings, key);
-  Future<String?> getShared(String key) => _get(_db.sharedSettings, key);
-
-  /// Сырое строковое значение без JSON-обёртки — для простых флагов
-  /// (workspace uid, тема, язык). Отдельный контракт от JSON-[getDevice].
-  /// Имена таблиц фиксированы схемой.
-  Future<String?> getString(String key, {bool shared = false}) async {
-    final table = shared ? 'shared_settings' : 'device_settings';
-    final row = await _db.customSelect(
-      'SELECT value FROM $table WHERE `key` = ?',
-      variables: [Variable(key)],
-      readsFrom: {shared ? _db.sharedSettings : _db.deviceSettings},
-    ).getSingleOrNull();
-    return row?.data['value'] as String?;
-  }
-
-  Future<void> setString(String key, String value, {bool shared = false}) {
-    final table = shared ? 'shared_settings' : 'device_settings';
-    return _db.customStatement(
-      'INSERT INTO $table (`key`, value) VALUES (?, ?) '
-      'ON CONFLICT(`key`) DO UPDATE SET value = excluded.value',
-      [key, value],
-    );
-  }
+  Future<String?> getDevice(String key) => _read(shared: false, key: key);
+  Future<String?> getShared(String key) => _read(shared: true, key: key);
 
   Future<void> setDevice(String key, Object? value) =>
-      _set(_db.deviceSettings, key, value);
+      _write(shared: false, key: key, value: value);
   Future<void> setShared(String key, Object? value) =>
-      _set(_db.sharedSettings, key, value);
+      _write(shared: true, key: key, value: value);
 
-  Future<String?> _get(TableInfo<dynamic, dynamic> table, String key) async {
-    final query = _db.customSelect(
-      'SELECT value FROM ${table.actualTableName} WHERE `key` = ?',
-      variables: [Variable(key)],
-      readsFrom: {table},
-    );
-    final row = await query.getSingleOrNull();
-    return row?.data['value'] as String?;
+  /// Строковая настройка (workspace uid, тема, язык). Значения, записанные
+  /// до единого формата без JSON-обёртки, читаются как есть.
+  Future<String?> getString(String key, {bool shared = false}) async {
+    final stored = await _read(shared: shared, key: key);
+    if (stored == null) return null;
+    try {
+      final decoded = jsonDecode(stored);
+      if (decoded is String) return decoded;
+    } on FormatException {
+      // устаревшее сырое значение
+    }
+    return stored;
   }
 
-  Future<void> _set(
-      TableInfo<dynamic, dynamic> table, String key, Object? value) {
-    final encoded = value == null ? null : jsonEncode(value);
-    return _db.customStatement(
-      'INSERT INTO ${table.actualTableName} (`key`, value) VALUES (?, ?) '
-      'ON CONFLICT(`key`) DO UPDATE SET value = excluded.value',
-      [key, encoded],
-    );
+  Future<void> setString(String key, String? value, {bool shared = false}) =>
+      _write(shared: shared, key: key, value: value);
+
+  // --- внутренние ---
+
+  Future<String?> _read({required bool shared, required String key}) async {
+    if (shared) {
+      final row = await (_db.select(
+        _db.sharedSettings,
+      )..where((s) => s.key.equals(key))).getSingleOrNull();
+      return row?.value;
+    }
+    final row = await (_db.select(
+      _db.deviceSettings,
+    )..where((s) => s.key.equals(key))).getSingleOrNull();
+    return row?.value;
+  }
+
+  Future<void> _write({
+    required bool shared,
+    required String key,
+    Object? value,
+  }) async {
+    if (value == null) {
+      if (shared) {
+        await (_db.delete(
+          _db.sharedSettings,
+        )..where((s) => s.key.equals(key))).go();
+      } else {
+        await (_db.delete(
+          _db.deviceSettings,
+        )..where((s) => s.key.equals(key))).go();
+      }
+      return;
+    }
+    final encoded = jsonEncode(value);
+    if (shared) {
+      await _db
+          .into(_db.sharedSettings)
+          .insertOnConflictUpdate(
+            SharedSettingsCompanion.insert(key: key, value: encoded),
+          );
+    } else {
+      await _db
+          .into(_db.deviceSettings)
+          .insertOnConflictUpdate(
+            DeviceSettingsCompanion.insert(key: key, value: encoded),
+          );
+    }
   }
 }

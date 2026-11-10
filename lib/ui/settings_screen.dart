@@ -9,6 +9,7 @@ import '../auth/auth_service.dart';
 import '../l10n/app_localizations.dart';
 import '../sync/sync_engine.dart';
 import 'app_theme.dart';
+import 'common/sync_label.dart';
 import 'debug_screen.dart';
 import 'conflicts_screen.dart';
 import 'providers.dart';
@@ -32,11 +33,11 @@ class SettingsScreen extends ConsumerWidget {
       padding: const EdgeInsets.all(16),
       child: ListView(
         children: [
-          Text(l10n.settings,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w800)),
+          Text(
+            l10n.settings,
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 16),
           _themeTile(context, ref, l10n, themeMode),
           _languageTile(context, ref, l10n, locale),
@@ -58,37 +59,41 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _themeTile(BuildContext context, WidgetRef ref, AppLocalizations l10n,
-      ThemeMode themeMode) {
+  Widget _themeTile(
+    BuildContext context,
+    WidgetRef ref,
+    AppLocalizations l10n,
+    ThemeMode themeMode,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(l10n.themeLabel, style: Theme.of(context).textTheme.titleSmall),
-        Text(
-          switch (themeMode) {
-            ThemeMode.light => l10n.themeLight,
-            ThemeMode.dark => l10n.themeDark,
-            ThemeMode.system => l10n.themeSystem,
-          },
-          style: mutedStyle(context),
-        ),
+        Text(switch (themeMode) {
+          ThemeMode.light => l10n.themeLight,
+          ThemeMode.dark => l10n.themeDark,
+          ThemeMode.system => l10n.themeSystem,
+        }, style: mutedStyle(context)),
         const SizedBox(height: 8),
         SizedBox(
           width: 260,
           child: SegmentedButton<ThemeMode>(
             segments: [
               ButtonSegment(
-                  value: ThemeMode.light,
-                  icon: const Icon(Icons.light_mode, size: 18),
-                  tooltip: l10n.themeLight),
+                value: ThemeMode.light,
+                icon: const Icon(Icons.light_mode, size: 18),
+                tooltip: l10n.themeLight,
+              ),
               ButtonSegment(
-                  value: ThemeMode.system,
-                  icon: const Icon(Icons.settings_suggest, size: 18),
-                  tooltip: l10n.themeSystem),
+                value: ThemeMode.system,
+                icon: const Icon(Icons.settings_suggest, size: 18),
+                tooltip: l10n.themeSystem,
+              ),
               ButtonSegment(
-                  value: ThemeMode.dark,
-                  icon: const Icon(Icons.dark_mode, size: 18),
-                  tooltip: l10n.themeDark),
+                value: ThemeMode.dark,
+                icon: const Icon(Icons.dark_mode, size: 18),
+                tooltip: l10n.themeDark,
+              ),
             ],
             selected: {themeMode},
             onSelectionChanged: (selection) =>
@@ -99,8 +104,12 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _languageTile(BuildContext context, WidgetRef ref,
-      AppLocalizations l10n, Locale? locale) {
+  Widget _languageTile(
+    BuildContext context,
+    WidgetRef ref,
+    AppLocalizations l10n,
+    Locale? locale,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -115,10 +124,14 @@ class SettingsScreen extends ConsumerWidget {
         SizedBox(
           width: 260,
           child: SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'system', label: Text('·')),
-              ButtonSegment(value: 'uk', label: Text('UA')),
-              ButtonSegment(value: 'en', label: Text('EN')),
+            segments: [
+              ButtonSegment(
+                value: 'system',
+                icon: const Icon(Icons.settings_suggest, size: 18),
+                tooltip: l10n.systemLanguage,
+              ),
+              const ButtonSegment(value: 'uk', label: Text('UA')),
+              const ButtonSegment(value: 'en', label: Text('EN')),
             ],
             selected: {locale?.languageCode ?? 'system'},
             onSelectionChanged: (selection) {
@@ -146,37 +159,35 @@ class SettingsScreen extends ConsumerWidget {
     // Состояние входа.
     final accountTile = switch (authState) {
       AuthSignedOut() => ListTile(
-          leading: const Icon(Icons.cloud_off),
-          title: Text(l10n.syncOff),
-          subtitle: Text(l10n.accountLocalOnly, style: mutedStyle(context)),
-        ),
+        leading: const Icon(Icons.cloud_off),
+        title: Text(l10n.syncOff),
+        subtitle: Text(l10n.accountLocalOnly, style: mutedStyle(context)),
+      ),
       AuthNeedsReauth(:final email) => ListTile(
-          leading: const Icon(Icons.refresh),
-          title: Text(l10n.reauthNeeded),
-          subtitle: Text(email ?? '', style: mutedStyle(context)),
-        ),
+        leading: const Icon(Icons.refresh),
+        title: Text(l10n.reauthNeeded),
+        subtitle: Text(email ?? '', style: mutedStyle(context)),
+      ),
       AuthSignedIn(:final session) => ListTile(
-          leading: const Icon(Icons.account_circle_outlined),
-          title: Text(session.email ?? l10n.signedInAs),
-          subtitle: Text('${l10n.uidLabel}: ${session.uid}',
-              style: mutedStyle(context)),
+        leading: const Icon(Icons.account_circle_outlined),
+        title: Text(session.email ?? l10n.signedInAs),
+        subtitle: Text(
+          '${l10n.uidLabel}: ${session.uid}',
+          style: mutedStyle(context),
         ),
+      ),
     };
 
     // Статус синхронизации (§10): ошибка видна, повтор с backoff.
-    final syncSubtitle = sync.workspaceMismatch
-        ? l10n.workspaceMismatch
-        : sync.permissionDenied
-            ? l10n.syncPermission
-            : sync.error != null
-                ? '${l10n.syncError}: ${sync.error}'
-                : sync.lastSyncAt == null
-                    ? l10n.syncOff
-                    : l10n.synced;
+    final syncSubtitle = syncStatusLabel(l10n, sync, withDetails: true);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(
+          l10n.accountSection,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
         accountTile,
         if (authState is AuthSignedIn) ...[
           Padding(
@@ -188,15 +199,13 @@ class SettingsScreen extends ConsumerWidget {
                   children: [
                     if (sync.running)
                       const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2))
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     else
                       Icon(
-                        sync.error != null
-                            ? Icons.sync_problem
-                            : Icons.sync,
+                        sync.error != null ? Icons.sync_problem : Icons.sync,
                         size: 18,
                         color: sync.error != null
                             ? Theme.of(context).colorScheme.error
@@ -204,8 +213,11 @@ class SettingsScreen extends ConsumerWidget {
                       ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(syncSubtitle,
-                          maxLines: 2, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        syncSubtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     TextButton(
                       onPressed: sync.running ? null : engine.syncNow,
@@ -213,8 +225,10 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                   ],
                 ),
-                Text('${l10n.notSynced}: ${sync.pendingOps}',
-                    style: mutedStyle(context)),
+                Text(
+                  l10n.pendingChangesN(sync.pendingOps),
+                  style: mutedStyle(context),
+                ),
               ],
             ),
           ),
@@ -237,8 +251,11 @@ class SettingsScreen extends ConsumerWidget {
                   await engine.initialMerge();
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content:
-                          Text('${l10n.signedInAs} ${session.email ?? ''}')),
+                      SnackBar(
+                        content: Text(
+                          '${l10n.signedInAs} ${session.email ?? ''}',
+                        ),
+                      ),
                     );
                   }
                 } catch (e) {
@@ -248,8 +265,10 @@ class SettingsScreen extends ConsumerWidget {
                     await showDialog<void>(
                       context: context,
                       builder: (ctx) => AlertDialog(
-                        title: Text(l10n.syncError),
-                        content: SingleChildScrollView(child: Text(e.toString())),
+                        title: Text(l10n.signInFailed),
+                        content: SingleChildScrollView(
+                          child: SelectableText('${l10n.errorDetails}: $e'),
+                        ),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(ctx),
@@ -269,8 +288,12 @@ class SettingsScreen extends ConsumerWidget {
 
   /// Выход (§9): вопрос о локальной копии; предупреждение о
   /// несинхронизированных изменениях перед удалением.
-  Future<void> _signOutFlow(BuildContext context, WidgetRef ref,
-      AuthService auth, SyncStatus sync) async {
+  Future<void> _signOutFlow(
+    BuildContext context,
+    WidgetRef ref,
+    AuthService auth,
+    SyncStatus sync,
+  ) async {
     final l10n = AppLocalizations.of(context)!;
     final keep = await showDialog<bool>(
       context: context,
@@ -316,13 +339,16 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   Widget _conflictsTile(
-      BuildContext context, WidgetRef ref, AppLocalizations l10n) {
+    BuildContext context,
+    WidgetRef ref,
+    AppLocalizations l10n,
+  ) {
     final db = ref.watch(appDatabaseProvider);
     return ListTile(
       leading: const Icon(Icons.merge_type),
       title: Text(l10n.conflicts),
-      subtitle: FutureBuilder<int>(
-        future: db.select(db.conflicts).get().then((r) => r.length),
+      subtitle: StreamBuilder<int>(
+        stream: db.select(db.conflicts).watch().map((r) => r.length),
         builder: (context, snap) =>
             Text('${snap.data ?? 0}', style: mutedStyle(context)),
       ),

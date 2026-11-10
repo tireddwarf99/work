@@ -20,10 +20,24 @@ class FirebaseConfig {
   static const String desktopClientId =
       '801436414302-v191510i21a70o5qbv4he1tefq7l1bu6.apps.googleusercontent.com';
 
-  /// Секрет desktop-клиента. Google требует его при обмене кода на токены.
-  /// Он не является границей безопасности: защиту обеспечивают PKCE,
-  /// Consent screen и Security Rules. Секрет не хранится в исходниках:
-  /// он берётся из переменной окружения DESKTOP_OAUTH_CLIENT_SECRET.
-  static String get desktopClientSecret =>
-      Platform.environment['DESKTOP_OAUTH_CLIENT_SECRET'] ?? '';
+  static const String _compiledDesktopSecret =
+      String.fromEnvironment('DESKTOP_OAUTH_CLIENT_SECRET');
+
+  /// Секрет desktop-клиента: Google требует его при обмене кода на токены.
+  /// Границей безопасности он не является (защиту дают PKCE, consent screen
+  /// и Security Rules), но в исходниках не хранится. Источники: сборка с
+  /// `--dart-define=DESKTOP_OAUTH_CLIENT_SECRET=...` (для пользователей),
+  /// затем переменная окружения (для разработки). Если не задан нигде —
+  /// [StateError]: пустой секрет не отправляется.
+  static String get desktopClientSecret {
+    final secret = _compiledDesktopSecret.isNotEmpty
+        ? _compiledDesktopSecret
+        : Platform.environment['DESKTOP_OAUTH_CLIENT_SECRET'] ?? '';
+    if (secret.isEmpty) {
+      throw StateError('Не задан DESKTOP_OAUTH_CLIENT_SECRET: соберите '
+          'приложение с --dart-define=DESKTOP_OAUTH_CLIENT_SECRET=<секрет> '
+          'или задайте переменную окружения (docs/cloud-setup.md).');
+    }
+    return secret;
+  }
 }
