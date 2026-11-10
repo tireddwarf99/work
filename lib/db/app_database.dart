@@ -48,7 +48,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -61,6 +61,10 @@ class AppDatabase extends _$AppDatabase {
           // Добавление таблицы не трогает существующие данные.
           if (from < 2) {
             await m.createTable(syncBase);
+          }
+          // v3: FTS-индекс связан с сущностями по UUID, а не по rowid.
+          if (from < 3) {
+            await recreateFtsSchema();
           }
         },
         beforeOpen: (details) async {

@@ -4,11 +4,11 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../db/app_database.dart';
-import '../../l10n/app_localizations.dart';
+import '../db/app_database.dart';
+import '../l10n/app_localizations.dart';
 import 'app_theme.dart';
+import 'common/task_actions.dart';
 import 'common/task_row.dart';
-import '../../data/search_service.dart';
 import 'providers.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -30,29 +30,45 @@ class SearchScreen extends ConsumerStatefulWidget {
 }
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
-  String _query = '';
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.query ?? '',
+  );
+  Future<(List<Note>, List<Task>)>? _results;
 
   @override
   void initState() {
     super.initState();
-    _query = widget.query ?? '';
+    _results = _search(_controller.text);
   }
 
-  Future<(List<Note>, List<Task>)> _runSearch(
-      SearchService search, String query) async {
-    final results = await Future.wait<Object?>(
-        [search.notes(query), search.tasks(query)]);
-    return (
-      results[0] as List<Note>,
-      results[1] as List<Task>,
-    );
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Запрос выполняется один раз на изменение текста или результата действия.
+  Future<(List<Note>, List<Task>)>? _search(String query) {
+    if (query.trim().isEmpty) return null;
+    final search = ref.read(searchServiceProvider);
+    return Future.wait<Object?>([search.notes(query), search.tasks(query)])
+        .then((r) => (r[0] as List<Note>, r[1] as List<Task>));
+  }
+
+  void _onChanged(String value) {
+    setState(() => _results = _search(value));
+    widget.onQueryChanged?.call(value);
+  }
+
+  Future<void> _toggle(Task task) async {
+    await toggleTaskCompletion(context, ref.read(tasksServiceProvider), task);
+    if (!mounted) return;
+    setState(() => _results = _search(_controller.text));
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final search = ref.watch(searchServiceProvider);
-    final controller = TextEditingController(text: _query);
     return Container(
       color: sidebarBackground(context),
       padding: const EdgeInsets.all(16),
@@ -60,18 +76,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TextField(
-            controller: controller,
+            controller: _controller,
             decoration: InputDecoration(
               prefixIcon: const Icon(Icons.search),
               hintText: l10n.searchHint,
             ),
-            onChanged: (v) {
-              setState(() => _query = v);
-              widget.onQueryChanged?.call(v);
-            },
+            onChanged: _onChanged,
           ),
           const SizedBox(height: 12),
-          if (_query.trim().isEmpty)
+          if (_results == null)
             Padding(
               padding: const EdgeInsets.all(8),
               child: Text(l10n.searchHint, style: mutedStyle(context)),
@@ -79,11 +92,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           else
             Expanded(
               child: FutureBuilder<(List<Note>, List<Task>)>(
-                future: _runSearch(search, _query),
+                future: _results,
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const SizedBox.shrink();
-                  }
+                  if (!snapshot.hasData) return const SizedBox.shrink();
                   final (notes, tasks) = snapshot.data!;
                   if (notes.isEmpty && tasks.isEmpty) {
                     return Padding(
@@ -106,13 +117,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       for (final task in tasks)
                         TaskRow(
                           task: task,
-                          onToggle: () async {
-                            final tasksService =
-                                ref.watch(tasksServiceProvider);
-                            await tasksService.setCompleted(
-                                task.id, task.completedAt == null);
-                            setState(() {});
-                          },
+                          onToggle: () => _toggle(task),
                           onOpen: () => widget.onOpenTask?.call(task.id),
                         ),
                     ],

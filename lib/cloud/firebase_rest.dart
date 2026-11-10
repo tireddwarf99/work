@@ -1,8 +1,8 @@
 /// Firebase по официальному REST API (§9): не FlutterFire — Windows-клиент
 /// работает напрямую. Аутентификация: Bearer Firebase ID token.
 ///
-/// Firestore REST: documents:get / runQuery / beginTransaction / commit.
-/// Протокол синхронизации — в sync_engine.dart.
+/// Firestore REST: documents:get / runQuery / beginTransaction / commit /
+/// rollback. Протокол синхронизации — в sync_engine.dart.
 library;
 
 import 'dart:convert';
@@ -16,6 +16,13 @@ class FirebaseApiException implements Exception {
   final int? statusCode;
   final String message;
 
+  /// Код ошибки Identity Toolkit/securetoken (начало поля `message`, напр.
+  /// `INVALID_REFRESH_TOKEN`); null, если ответ без такого кода.
+  final String? code;
+
+  /// gRPC-статус из тела ответа (`ABORTED`, `PERMISSION_DENIED`, …).
+  final String? status;
+
   /// RESOURCE_EXHAUSTED (квота), UNAVAILABLE, INTERNAL — повторять с backoff.
   final bool retryable;
 
@@ -26,8 +33,12 @@ class FirebaseApiException implements Exception {
   final bool aborted;
 
   FirebaseApiException(this.message,
-      {this.statusCode, this.retryable = false,
-      this.permissionDenied = false, this.aborted = false});
+      {this.statusCode,
+      this.code,
+      this.status,
+      this.retryable = false,
+      this.permissionDenied = false,
+      this.aborted = false});
 
   @override
   String toString() => 'FirebaseApiException($statusCode: $message)';
@@ -51,16 +62,16 @@ class FirebaseRestClient {
     String? googleAccessToken,
   }) async {
     final variants = <String>[
-      'id_token=$googleIdToken&providerId=google.com',
+      _formEncode({'id_token': googleIdToken, 'providerId': 'google.com'}),
       if (googleAccessToken != null)
-        'access_token=$googleAccessToken&providerId=google.com',
+        _formEncode(
+            {'access_token': googleAccessToken, 'providerId': 'google.com'}),
     ];
-    String lastError = 'signInWithIdp failed';
-    int lastStatus = 0;
+    late FirebaseApiException lastError;
     for (final postBody in variants) {
       final response = await _http.post(
-        Uri.parse(
-            'https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${FirebaseConfig.apiKey}'),
+        Uri.https('identitytoolkit.googleapis.com',
+            '/v1/accounts:signInWithIdp', {'key': FirebaseConfig.apiKey}),
         headers: const {'Content-Type': 'application/json'},
         body: jsonEncode({
           'postBody': postBody,
@@ -94,17 +105,20 @@ class FirebaseRestClient {
               expiresIn is String ? (int.tryParse(expiresIn) ?? 3600) : 3600,
         );
       }
-      lastStatus = response.statusCode;
-      lastError = _extractErrorMessage(body) ??
-          'signInWithIdp failed: HTTP $lastStatus';
+      lastError = _exceptionFor(response, fallback: 'signInWithIdp failed');
       // Неверный формат credential — пробуем следующий вариант.
-      if (!lastError.contains('INVALID_CREDENTIAL_OR_PROVIDER_ID') &&
-          !lastError.contains('INVALID_IDP_RESPONSE')) {
+      if (lastError.code != 'INVALID_CREDENTIAL_OR_PROVIDER_ID' &&
+          lastError.code != 'INVALID_IDP_RESPONSE') {
         break;
       }
     }
-    throw FirebaseApiException(lastError, statusCode: lastStatus);
+    throw lastError;
   }
+
+  static String _formEncode(Map<String, String> params) => params.entries
+      .map((e) => '${Uri.encodeQueryComponent(e.key)}='
+          '${Uri.encodeQueryComponent(e.value)}')
+      .join('&');
 
   /// Безопасное декодирование тела ответа; null — не JSON-объект.
   Map<String, dynamic>? _tryDecodeMap(http.Response response) {
@@ -116,23 +130,11 @@ class FirebaseRestClient {
     }
   }
 
-  /// Сообщение об ошибке из стандартного объекта `{"error": {...}}`.
-  String? _extractErrorMessage(Map<String, dynamic>? body) {
-    if (body == null) return null;
-    final error = body['error'];
-    if (error is Map<String, dynamic>) {
-      final message = error['message'];
-      if (message is String) return message;
-    }
-    if (error is String) return error;
-    return null;
-  }
-
   /// Обновление Firebase ID token по refresh token (securetoken).
   Future<AuthTokens> refreshIdToken(String refreshToken) async {
     final response = await _http.post(
-      Uri.parse(
-          'https://securetoken.googleapis.com/v1/token?key=${FirebaseConfig.apiKey}'),
+      Uri.https('securetoken.googleapis.com', '/v1/token',
+          {'key': FirebaseConfig.apiKey}),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
         'grant_type': 'refresh_token',
@@ -141,10 +143,7 @@ class FirebaseRestClient {
     );
     final body = _tryDecodeMap(response);
     if (response.statusCode != 200 || body == null) {
-      throw FirebaseApiException(
-          _extractErrorMessage(body) ??
-              'token refresh failed: HTTP ${response.statusCode}',
-          statusCode: response.statusCode);
+      throw _exceptionFor(response, fallback: 'token refresh failed');
     }
     final idToken = body['id_token'];
     final newRefresh = body['refresh_token'];
@@ -183,9 +182,10 @@ class FirebaseRestClient {
   /// Документ по пути; null — не существует.
   Future<Map<String, dynamic>?> getDocument(String path,
       {String? transaction}) async {
-    final url = Uri.parse(transaction == null
-        ? _documentsUrl(path)
-        : '${_documentsUrl(path)}?transaction=$transaction');
+    final base = Uri.parse(_documentsUrl(path));
+    final url = transaction == null
+        ? base
+        : base.replace(queryParameters: {'transaction': transaction});
     final response = await _http.get(url, headers: _headers());
     if (response.statusCode == 404) return null;
     _check(response);
@@ -215,14 +215,23 @@ class FirebaseRestClient {
   /// beginTransaction (readWrite) — для протокола §10.
   Future<String> beginTransaction() async {
     final response = await _http.post(
-      Uri.parse(
-          '${_documentsUrl('')}:beginTransaction'),
+      Uri.parse('${_documentsUrl('')}:beginTransaction'),
       headers: _headers(),
       body: jsonEncode({'options': {'readWrite': {}}}),
     );
     _check(response);
     final body = jsonDecode(_utf8(response)) as Map<String, dynamic>;
     return body['transaction'] as String;
+  }
+
+  /// Откат транзакции, не дошедшей до commit (освобождает блокировки).
+  Future<void> rollback(String transaction) async {
+    final response = await _http.post(
+      Uri.parse('${_documentsUrl('')}:rollback'),
+      headers: _headers(),
+      body: jsonEncode({'transaction': transaction}),
+    );
+    _check(response);
   }
 
   /// Пакетное чтение документов внутри транзакции: для каждого пути —
@@ -260,8 +269,8 @@ class FirebaseRestClient {
     return result;
   }
 
-  /// commit пакета записей. [preconditionUpdateTime] — precondition по
-  /// прочитанной версии конкретного документа (§10).
+  /// commit пакета записей; precondition конкретного документа задаётся
+  /// в самой записи (`currentDocument`, §10).
   Future<CommitResult> commit({
     required List<Map<String, dynamic>> writes,
     String? transaction,
@@ -274,10 +283,6 @@ class FirebaseRestClient {
         'writes': writes,
       }),
     );
-    if (response.statusCode == 409) {
-      throw FirebaseApiException('transaction aborted',
-          statusCode: 409, aborted: true);
-    }
     _check(response);
     final body = jsonDecode(_utf8(response)) as Map<String, dynamic>;
     final writeResults =
@@ -332,51 +337,72 @@ class FirebaseRestClient {
 
   void _check(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) return;
+    throw _exceptionFor(response, fallback: 'request failed');
+  }
+
+  /// Классификация ответа-ошибки. HTTP-код — база (работает и для не-JSON
+  /// тела); тело уточняет: ошибки Firestore приходят объектом
+  /// `{"error": {...}}`, ошибки runQuery — списком таких объектов.
+  FirebaseApiException _exceptionFor(http.Response response,
+      {required String fallback}) {
     final httpCode = response.statusCode;
     final body = _utf8(response);
 
-    // Классификация по HTTP-коду — базовая, работает и для не-JSON тела.
     var retryable = httpCode == 429 || httpCode == 503 || httpCode == 500;
     var permissionDenied = httpCode == 403;
     var aborted = httpCode == 409;
 
-    // REST-ошибки Firestore приходят объектом {"error": {...}}; ошибки
-    // runQuery — списком таких объектов. Поддерживаем обе формы.
-    var message = body;
     Map<String, dynamic>? error;
     try {
       final decoded = jsonDecode(body);
-      if (decoded is Map<String, dynamic> && decoded['error'] is Map) {
-        error = decoded['error'] as Map<String, dynamic>;
+      if (decoded is Map<String, dynamic>) {
+        final e = decoded['error'];
+        if (e is Map<String, dynamic>) error = e;
       } else if (decoded is List && decoded.isNotEmpty) {
         final first = decoded.first;
-        if (first is Map<String, dynamic> && first['error'] is Map) {
+        if (first is Map<String, dynamic> &&
+            first['error'] is Map<String, dynamic>) {
           error = first['error'] as Map<String, dynamic>;
         }
       }
     } on FormatException {
-      // тело не JSON — оставляем raw
+      // тело не JSON — остаются HTTP-признаки
     }
+
+    var message = body.isEmpty ? '$fallback: HTTP $httpCode' : body;
+    String? code;
+    String? status;
     if (error != null) {
-      message = error['message'] is String ? error['message'] as String : body;
-      final grpcStatus = error['status'];
-      if (grpcStatus == 'PERMISSION_DENIED') permissionDenied = true;
-      if (grpcStatus == 'ABORTED') aborted = true;
-      if (grpcStatus == 'RESOURCE_EXHAUSTED' ||
-          grpcStatus == 'UNAVAILABLE' ||
-          grpcStatus == 'INTERNAL') {
-        retryable = true;
+      final rawMessage = error['message'];
+      if (rawMessage is String && rawMessage.isNotEmpty) {
+        message = rawMessage;
+        final head = RegExp(r'^[A-Z][A-Z0-9_]+').firstMatch(rawMessage);
+        code = head?.group(0);
       }
-      final code = error['code'];
-      if (code is int) {
-        permissionDenied |= code == 403;
-        aborted |= code == 409;
-        retryable |= code == 429 || code == 503 || code == 500;
+      final grpcStatus = error['status'];
+      if (grpcStatus is String) {
+        status = grpcStatus;
+        permissionDenied |= grpcStatus == 'PERMISSION_DENIED';
+        // Не выполненный precondition (updateTime) — та же гонка: перечитать.
+        aborted |= grpcStatus == 'ABORTED' ||
+            grpcStatus == 'ALREADY_EXISTS' ||
+            grpcStatus == 'FAILED_PRECONDITION';
+        retryable |= grpcStatus == 'RESOURCE_EXHAUSTED' ||
+            grpcStatus == 'UNAVAILABLE' ||
+            grpcStatus == 'INTERNAL';
+      }
+      final numeric = error['code'];
+      if (numeric is int) {
+        permissionDenied |= numeric == 403;
+        aborted |= numeric == 409;
+        retryable |= numeric == 429 || numeric == 503 || numeric == 500;
       }
     }
 
-    throw FirebaseApiException(message,
+    return FirebaseApiException(message,
         statusCode: httpCode,
+        code: code,
+        status: status,
         retryable: retryable,
         permissionDenied: permissionDenied,
         aborted: aborted);

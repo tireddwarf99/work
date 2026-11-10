@@ -8,12 +8,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/folders_service.dart';
 import '../../db/app_database.dart';
 import '../../l10n/app_localizations.dart';
 import '../app_theme.dart';
 import '../common/platform_drag.dart';
 import '../providers.dart';
+import '../queries.dart';
 import 'note_actions.dart';
 
 class NotesPane extends ConsumerWidget {
@@ -35,8 +35,11 @@ class NotesPane extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notes = ref.watch(notesServiceProvider);
-    final folders = ref.watch(foldersServiceProvider);
     final l10n = AppLocalizations.of(context)!;
+    final target = folderId;
+    final header = target == null
+        ? l10n.notes
+        : (ref.watch(folderProvider(target)).value?.name ?? l10n.noFolder);
 
     Widget pane = Container(
       color: sidebarBackground(context),
@@ -49,15 +52,10 @@ class NotesPane extends ConsumerWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
-                child: FutureBuilder<String>(
-                  future: _headerText(folders, l10n),
-                  builder: (context, snap) => Text(
-                    snap.data ?? l10n.notes,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w800),
-                  ),
+                child: Text(
+                  header,
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ),
               if (items.isEmpty)
@@ -101,6 +99,7 @@ class NotesPane extends ConsumerWidget {
           bottom: 16,
           child: Consumer(
             builder: (context, ref, _) => FloatingActionButton(
+              tooltip: l10n.newNote,
               onPressed: () async {
                 final notesService = ref.read(notesServiceProvider);
                 final note = await notesService.create(folderId: folderId);
@@ -112,18 +111,6 @@ class NotesPane extends ConsumerWidget {
         ),
       ],
     );
-  }
-
-  Future<String> _headerText(
-      FoldersService folders, AppLocalizations l10n) async {
-    final target = folderId;
-    if (target == null) return l10n.notes;
-    try {
-      final folder = await folders.get(target);
-      return folder.name;
-    } on StateError {
-      return l10n.noFolder;
-    }
   }
 }
 
@@ -172,17 +159,16 @@ class _NoteTile extends ConsumerWidget {
                     ),
                   ),
                   if (note.pinned)
-                    Icon(
-                      Icons.push_pin,
-                      size: 14,
-                      color: mutedText(context),
-                    ),
+                    Icon(Icons.push_pin, size: 14, color: mutedText(context)),
                   InkWell(
                     onTap: () async {
                       await showNoteMenu(context, ref, note);
                     },
-                    child: Icon(Icons.more_vert,
-                        size: 16, color: mutedText(context)),
+                    child: Icon(
+                      Icons.more_vert,
+                      size: 16,
+                      color: mutedText(context),
+                    ),
                   ),
                 ],
               ),
@@ -239,8 +225,10 @@ class _NoteTile extends ConsumerWidget {
   String _subtitle(Note note, AppLocalizations l10n) {
     final text = note.searchText.trim();
     final snippet = text.isEmpty ? '' : text.split('\n').first;
-    final date =
-        DateFormat('d MMM', l10n.localeName).format(note.modifiedAt.toLocal());
+    final date = DateFormat(
+      'd MMM',
+      l10n.localeName,
+    ).format(note.modifiedAt.toLocal());
     return '$snippet · $date'.trim();
   }
 }
